@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="PentagonLauncher.Backend/PentagonLauncher.Backend.csproj" />
+  <Project Path="PentagonLauncher.Launcher/PentagonLauncher.Launcher.csproj" />
+</Solution>
