@@ -4,3 +4,4 @@
 Console.WriteLine("Hello, World!");
 
 Console.WriteLine(Test.a);
+Console.WriteLine("abc");
