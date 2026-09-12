@@ -1,3 +1,6 @@
-﻿Console.WriteLine("Hello, World!");
+﻿using PentagonLauncher.Shared;
 
-Console.WriteLine("New Line");
+
+Console.WriteLine("Hello, World!");
+
+Console.WriteLine(Test.a);

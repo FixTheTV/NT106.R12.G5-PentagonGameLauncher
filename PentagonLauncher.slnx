@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="PentagonLauncher.Backend/PentagonLauncher.Backend.csproj" />
   <Project Path="PentagonLauncher.Launcher/PentagonLauncher.Launcher.csproj" />
+  <Project Path="PentagonLauncher.Shared/PentagonLauncher.Shared.csproj" Id="d923ed26-323b-4166-a2e3-a4c44645502f" />
 </Solution>
