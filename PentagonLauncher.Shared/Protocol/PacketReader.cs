@@ -22,7 +22,7 @@ namespace PentagonLauncher.Shared.Protocol
         public byte ReadByte()
         {
             EnsureCanRead(1);
-            return _payload[_offset + 1];
+            return _payload[_offset++];
 
         }
         public bool ReadBoolean()
