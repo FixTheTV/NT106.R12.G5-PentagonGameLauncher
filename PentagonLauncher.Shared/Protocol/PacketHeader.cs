@@ -17,7 +17,7 @@ namespace PentagonLauncher.Shared.Protocol
             if (totalLength < PacketConstants.HeaderSize)
             {
                 throw new ProtocolException(
-                    $"Packet length không hợp lệ : {TotalLength} .");
+                    $"Packet length không hợp lệ : {totalLength} .");
             }
             if (totalLength > PacketConstants.MaximumPackerSize)
             {

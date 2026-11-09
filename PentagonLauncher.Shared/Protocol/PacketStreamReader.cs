@@ -17,7 +17,7 @@ namespace PentagonLauncher.Shared.Protocol
             byte[] payload = new byte[header.PayloadLength];
             if (payload.Length > 0)
             {
-                await ReadExactlyAsync(stream, headerBytes, cancellationToken);
+                await ReadExactlyAsync(stream, payload, cancellationToken);
             }
             return new Packet(header, payload);
         }
