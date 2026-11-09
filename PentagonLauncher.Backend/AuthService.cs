@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using BCrypt.Net;
+using BCrypt.Net;  //thư viện để băm mật khẩu 1 chiều(HashPassword khi tạo, Verify khi đối chiếu)
+using PentagonLauncher.Shared.Models.Authentication; //de lấy được file LoginResult.cs va file Longin Result.cs bên .Shared.Models.authentcation , để bổ sung 2 hàm overload (hàm cùng tên nhưng nhận model ) 
 
 namespace PentagonLauncher.Backend
 {
@@ -58,6 +59,17 @@ namespace PentagonLauncher.Backend
             return created ? (true, "Đăng ký tài khoản thành công.") : (false, "Lỗi khi lưu dữ liệu người dùng.");
         }
 
+        //hàm overload(hàm cùng tên-RegisterAsync nhưng nhận Model): Cùng gọi hàm RegisterAsync, nhưng ko truyền vào 3 biến như ở bên trên, mà truyền vào đối tượng kiểu LoginRequest, thì nó sẽ chạy  hàm này, chứu ko phải hàm trên 
+        public async Task<RegisterResult> RegisterAsync(RegisterRequest request)
+        {
+            var res = await RegisterAsync(request.Username, request.Email, request.Password);
+            return new RegisterResult
+            {
+                Success = res.Success,
+                Message = res.Message
+            };
+        }
+
         // Task: Xây dựng chức năng đăng nhập
         public async Task<(bool Success, string Message, int UserId, string Username)> LoginAsync(string username, string password)
         {
@@ -79,6 +91,18 @@ namespace PentagonLauncher.Backend
                 return (false, "Mật khẩu không chính xác.", 0, string.Empty);
 
             return (true, "Đăng nhập thành công.", user.Value.Id, user.Value.Username);
+        }
+        //Hàm overload-LoginAsync
+        public async Task<LoginResult> LoginAsync(LoginRequest request)
+        {
+            var res = await LoginAsync(request.Username, request.Password);
+            return new LoginResult
+            {
+                Success = res.Success,
+                Message = res.Message,
+                UserId = res.UserId,
+                Username = res.Username
+            };
         }
 
         // Task: Xây dựng chức năng đăng xuất
@@ -117,6 +141,16 @@ namespace PentagonLauncher.Backend
 
             return (true, "Mã xác nhận 6 chữ số đã được gửi (kiểm tra console server).");
         }
+        // Hàm overload RequestPasswordResetAsync: Nhận Model ForgotPasswordRequest
+        public async Task<ForgotPasswordResult> RequestPasswordResetAsync(ForgotPasswordRequest request)
+        {
+            var res = await RequestPasswordResetAsync(request.Email);
+            return new ForgotPasswordResult
+            {
+                Success = res.Success,
+                Message = res.Message
+            };
+        }
 
         // Task: Xây dựng kiểm tra mã xác nhận, hạn mã & đặt lại mật khẩu
         public async Task<(bool Success, string Message)> ResetPasswordAsync(string email, string otpCode, string newPassword)
@@ -154,6 +188,22 @@ namespace PentagonLauncher.Backend
             return (true, "Đặt lại mật khẩu thành công! Bạn có thể đăng nhập ngay.");
         }
 
+        // Hàm overload ResetPasswordAsync: Nhận Model ResetPasswordRequest
+        public async Task<ResetPasswordResult> ResetPasswordAsync(ResetPasswordRequest request)
+        {
+            var res = await ResetPasswordAsync(request.Email, request.OtpCode, request.NewPassword);
+            return new ResetPasswordResult
+            {
+                Success = res.Success,
+                Message = res.Message
+            };
         #endregion
+        }
     }
 }
+
+
+
+//Băm mật khẩu một chiều bằng thư viện chuẩn BCrypt.Net (HashPassword khi tạo, Verify khi đối chiếu).
+//Kiểm tra chặt chẽ độ dài, định dạng regex tên người dùng (^[a-zA-Z0-9_]{3,20}$) và email hợp lệ.   
+//Luồng OTP: sinh ngẫu nhiên 6 chữ số, quy định thời hạn hiệu lực đúng 5 phút (DateTime.UtcNow.AddMinutes(5)) và in ra console rõ ràng để phục vụ demo.
