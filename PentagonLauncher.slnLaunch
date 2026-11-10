@@ -1,0 +1,16 @@
+[
+  {
+    "Name": "New Profile",
+    "Projects": [
+      {
+        "Path": "PentagonLauncher.Backend\\PentagonLauncher.Backend.csproj",
+        "Action": "Start",
+        "DebugTarget": "PentagonLauncher.Backend"
+      },
+      {
+        "Path": "PentagonLauncher.Launcher\\PentagonLauncher.Launcher.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]
