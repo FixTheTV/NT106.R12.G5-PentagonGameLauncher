@@ -140,3 +140,9 @@ namespace PentagonLauncher.Backend
     }
 
 }
+
+
+
+//Toàn bộ câu lệnh SQL (SELECT, INSERT, UPDATE) đều dùng tham số hóa qua cmd.Parameters.AddWithValue(...) -> chống SQL Injection 100%.  
+//Dùng using var quản lý kết nối MySqlConnection và MySqlCommand-> tự giải phóng tài nguyên sau khi truy vấn, tránh rò rỉ bộ nhớ (memory leak).   
+//
