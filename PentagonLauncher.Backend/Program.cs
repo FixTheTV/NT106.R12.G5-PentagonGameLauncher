@@ -1,7 +1,9 @@
-﻿using System;
+using System;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading;
 using System.Threading.Tasks;
+using PentagonLauncher.Backend.Networking;
 
 namespace PentagonLauncher.Backend
 {
@@ -15,14 +17,32 @@ namespace PentagonLauncher.Backend
             Console.WriteLine($"[*] BACKEND SERVER KHỞI ĐỘNG TRÊN CỔNG: {Port}");
             Console.WriteLine("_________________________________");
 
-            // Khởi tạo các Service bên toi (Long)
+            // Khởi tạo các Service bên Long
             var databaseService = new DatabaseService();
             var authService = new AuthService(databaseService);
 
-            // Khoii khởi động TCP Listener lắng nghe kết nối
+            // Khởi tạo quản lý phiên và bộ xử lý gói tin bên Khôi
+            var sessionManager = new SessionManager();
+            var tcpServer = new LauncherTcpServer(sessionManager, authService);
+
+            // Khôi khởi động TCP Listener lắng nghe kết nối
             TcpListener server = new TcpListener(IPAddress.Any, Port);
             server.Start();
             Console.WriteLine("[*] Đang chờ client WinForms kết nối tới...");
+
+            // Nếu truyền tham số "--test" hoặc bấm phím 'T' trong 2 giây đầu thì chạy thêm luồng Client ảo tự test
+            _ = Task.Run(async () =>
+            {
+                Console.WriteLine("[Tip] Nhấn phím 'T' bất kỳ lúc nào trên cửa sổ này để bắn thử bộ gói tin Test tự động vào Server...");
+                while (true)
+                {
+                    var key = Console.ReadKey(intercept: true);
+                    if (key.Key == ConsoleKey.T)
+                    {
+                        await SelfTestClient.RunAsync(Port, sessionManager);
+                    }
+                }
+            });
 
             // Vòng lặp nhận client liên tục (của Khôi)
             while (true)
@@ -31,7 +51,9 @@ namespace PentagonLauncher.Backend
                 Console.WriteLine($"[+] Có client mới kết nối từ: {client.Client.RemoteEndPoint}");
 
                 // Khôi bọc client này thành một ClientPeer và xử lý trong luồng riêng
-                // _ = Task.Run(() => HandleClientAsync(client, authService));
+                var peer = new ClientPeer(client);
+                sessionManager.AddPeer(peer);
+                _ = Task.Run(() => tcpServer.ReceiveLoopAsync(peer, CancellationToken.None));
             }
         }
     }
