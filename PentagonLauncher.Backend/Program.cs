@@ -4,7 +4,7 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using PentagonLauncher.Backend.Networking;
-
+using PentagonLauncher.Backend.Services;
 namespace PentagonLauncher.Backend
 {
     internal class Program
@@ -29,20 +29,6 @@ namespace PentagonLauncher.Backend
             TcpListener server = new TcpListener(IPAddress.Any, Port);
             server.Start();
             Console.WriteLine("[*] Đang chờ client WinForms kết nối tới...");
-
-            // Nếu truyền tham số "--test" hoặc bấm phím 'T' trong 2 giây đầu thì chạy thêm luồng Client ảo tự test
-            _ = Task.Run(async () =>
-            {
-                Console.WriteLine("[Tip] Nhấn phím 'T' bất kỳ lúc nào trên cửa sổ này để bắn thử bộ gói tin Test tự động vào Server...");
-                while (true)
-                {
-                    var key = Console.ReadKey(intercept: true);
-                    if (key.Key == ConsoleKey.T)
-                    {
-                        await SelfTestClient.RunAsync(Port, sessionManager);
-                    }
-                }
-            });
 
             // Vòng lặp nhận client liên tục (của Khôi)
             while (true)

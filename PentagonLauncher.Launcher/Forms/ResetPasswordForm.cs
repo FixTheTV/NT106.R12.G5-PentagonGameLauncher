@@ -3,21 +3,26 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Linq;
 using System.Threading.Tasks;
-using PentagonLauncher.Launcher.Services;
+using PentagonLauncher.Launcher.Networking;
+using PentagonLauncher.Shared.Models.Authentication;
 
 namespace PentagonLauncher.Launcher.Forms;
 
 public partial class ResetPasswordForm : Form
 {
+    private readonly LauncherTcpClient client = LauncherTcpClient.Shared;
+
+    private readonly string _email;
     private string _resetToken = "";
 
-    public ResetPasswordForm()
+    public ResetPasswordForm(string email)
     {
         InitializeComponent();
         AcceptButton = btnReset;
+        _email = email;
     }
 
-    public ResetPasswordForm(string resetToken) : this() => _resetToken = resetToken;
+    public ResetPasswordForm(string email,string resetToken) : this(email) => _resetToken = resetToken;
 
     private async void btnReset_Click(object? sender, EventArgs e)
     {
@@ -27,7 +32,7 @@ public partial class ResetPasswordForm : Form
         btnReset.Enabled = false;
         try
         {
-            AuthResult result = await Program.Auth.ResetPasswordAsync(_resetToken, password);
+            var result = await client.ResetPasswordAsync(_email,_resetToken, password);
             using var dialog = new ResultForm(result.Success, result.Message);
             dialog.ShowDialog(this);
             if (result.Success)

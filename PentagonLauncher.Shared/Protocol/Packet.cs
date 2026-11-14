@@ -7,8 +7,8 @@ namespace PentagonLauncher.Shared.Protocol
     public sealed class Packet
     {
         public PacketHeader Header { get; }
-        public Opcode opcode => Header.Opcode;
-        public byte[] Payload { get; }
+        public Opcode Opcode => Header.Opcode;
+        public byte[] Payload { get; } 
         public Packet(PacketHeader header, byte[] payload)
         {
             ArgumentNullException.ThrowIfNull(payload);

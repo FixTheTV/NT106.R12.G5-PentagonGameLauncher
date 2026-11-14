@@ -19,10 +19,15 @@ namespace PentagonLauncher.Shared.Protocol
         S2C_ForgotPasswordResult = 2003,
         C2S_ResetPasswordRequest = 1004,
         S2C_ResetPasswordResult = 2004,
+
+        C2S_RegisterOTPRequest = 1005,
+        S2C_RegisterOTPResult = 2005,
+
+        C2S_RegisterOTPVerificationRequest = 1006,
+        S2C_RegisterOTPVerificationResult = 2006,
         // Lobby
         C2S_JoinLobbyRequest = 1101,
         S2C_JoinLobbyResponse = 2101,
-
         C2S_LeaveLobbyRequest = 1102,
         S2C_LobbyStateUpdate = 2102,
 

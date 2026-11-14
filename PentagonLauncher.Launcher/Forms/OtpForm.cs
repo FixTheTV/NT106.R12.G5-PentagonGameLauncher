@@ -3,12 +3,16 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Linq;
 using System.Threading.Tasks;
-using PentagonLauncher.Launcher.Services;
+using PentagonLauncher.Launcher.Networking;
+using PentagonLauncher.Shared.Interfaces;
+using PentagonLauncher.Shared.Models;
+using PentagonLauncher.Shared.Models.Authentication;
 
 namespace PentagonLauncher.Launcher.Forms;
 
 public partial class OtpForm : Form
 {
+    private readonly LauncherTcpClient client = LauncherTcpClient.Shared;
     private string _email = "";
     private DateTime _expiresAt;
     private DateTime _resendAvailableAt;
@@ -115,10 +119,10 @@ public partial class OtpForm : Form
         btnVerify.Enabled = false;
         try
         {
-            OtpVerificationResult verify = await Program.Auth.VerifyOtpAsync(_email, code);
+            RegisterOTPVerificationResult verify = await client.RequestRegisterOTPVerificationAsync(_email, code);
             if (!verify.Success) { lblStatus.Text = verify.Message; return; }
             _clock.Stop();
-            using var reset = new ResetPasswordForm(verify.ResetToken);
+            using var reset = new ResetPasswordForm(_email,verify.Message);
             Hide();
             if (reset.ShowDialog(this) == DialogResult.OK)
             {
@@ -140,7 +144,7 @@ public partial class OtpForm : Form
         btnResend.Enabled = false;
         try
         {
-            var result = await Program.Auth.RequestPasswordResetAsync(_email);
+            var result = await client.RequestPasswordResetAsync(_email);
             if (!result.Success) { lblStatus.Text = result.Message; return; }
             foreach (var box in _otpBoxes) box.Clear();
             _otpBoxes[0].Focus();

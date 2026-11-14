@@ -1,18 +1,25 @@
+using PentagonLauncher.Shared.Models.Authentication;
+using PentagonLauncher.Shared.Protocol;
+using PentagonLauncher.Shared.Protocol.Serializers;
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using PentagonLauncher.Shared.Protocol;
+using static System.Net.WebRequestMethods;
 
 namespace PentagonLauncher.Launcher.Networking
 {
     // Khuôn mẫu kết quả trả về cho UI của Thanh Hiền dễ sử dụng
-    public record BasicResponse(bool Success, string Message);
-    public record LoginResponse(bool Success, string Message, int UserId = 0, string Username = "");
+    //public record BasicResponse(bool Success, string Message);
+    //public record LoginResponse(bool Success, string Message, int UserId = 0, string Username = "");
+
+    public record DemoOTPRequestResponse(bool Success, string Message, DateTime ExpiresAtUtc);
 
     public class LauncherTcpClient : IDisposable
     {
+        public static LauncherTcpClient Shared { get; } = new LauncherTcpClient();
         private TcpClient? _tcpClient;
         private NetworkStream? _stream;
         private CancellationTokenSource? _cts;
@@ -88,8 +95,7 @@ namespace PentagonLauncher.Launcher.Networking
                     // Nếu Server gửi gói Ping (2000), tự động trả lời Pong (1000)
                     if (header.Opcode == Opcode.S2C_Ping)
                     {
-                        var writer = new PacketWriter();
-                        byte[] pongPacket = writer.Build(Opcode.C2S_Pong);
+                        byte[] pongPacket = ConnectionPacketSerializer.CreatePongPacket();
                         await _stream.WriteAsync(pongPacket, 0, pongPacket.Length, token);
                         continue;
                     }
@@ -141,113 +147,171 @@ namespace PentagonLauncher.Launcher.Networking
         // 4. CÁC HÀM API DÀNH CHO UI CỦA THANH HIỀN GỌI TRỰC TIẾP
 
         // 4.1. Đăng nhập (Gửi 1001 -> Nhận 2001)
-        public async Task<LoginResponse> LoginAsync(string username, string password)
+        public async Task<LoginResult> LoginAsync(string username, string password)
+        {
+            try
+            {
+                byte[] requestBytes = AuthPacketSerializer.CreareLoginRequest(new LoginRequest
+                {
+                    Username = username ?? string.Empty,
+                    Password = password ?? string.Empty
+                });
+
+                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
+                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                {
+                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    return new LoginResult { Success = errSuccess, Message = errMsg};
+                }
+                return AuthPacketSerializer.ReadLoginResult(CreatePacket(responseOpcode, payload));
+            }
+            catch (Exception ex)
+            {
+                return new LoginResult { Success = false, Message = $"Lỗi kết nối: {ex.Message}"};
+            }
+        }
+
+        // 4.2. Đăng ký (Gửi 1002 -> Nhận 2002)
+        public async Task<RegisterResult> RegisterAsync(string username, string email, string password)
+        {
+            try
+            {
+                byte[] requestBytes = AuthPacketSerializer.CreateRegisterPacket(new RegisterRequest
+                {
+                    Username = username ?? string.Empty,
+                    Email = email ?? string.Empty,
+                    Password = password ?? string.Empty
+                });
+
+                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
+                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                {
+                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    return new RegisterResult { Success = errSuccess, Message = errMsg };
+                }
+                return AuthPacketSerializer.ReadRequestResult(CreatePacket(responseOpcode, payload));
+            }
+            catch (Exception ex)
+            {
+                return new RegisterResult { Success = false, Message = $"Lỗi kết nối: {ex.Message}" };
+            }
+        }
+
+        // 4.3. Quên mật khẩu / Yêu cầu mã OTP (Gửi 1003 -> Nhận 2003)
+        public async Task<ForgotPasswordResult> RequestPasswordResetAsync(string email)
+        {
+            try
+            {
+                byte[] requestBytes = AuthPacketSerializer.CreateForgotPasswordPacket(new ForgotPasswordRequest
+                {
+                    Email = email ?? string.Empty
+                });
+
+                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
+                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                {
+                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    return new ForgotPasswordResult { Success = errSuccess, Message = errMsg };
+                }
+                return AuthPacketSerializer.ReadForgotPasswordResult(CreatePacket(responseOpcode, payload));
+            }
+            catch (Exception ex)
+            {
+                return new ForgotPasswordResult { Success = false, Message = $"Lỗi kết nối: {ex.Message}" };
+            }
+        }
+
+
+        // 4.4. Đặt lại mật khẩu bằng OTP (Gửi 1004 -> Nhận 2004)
+        public async Task<ResetPasswordResult> ResetPasswordAsync(string email, string otp, string newPassword)
+        {
+            try
+            {
+                byte[] requestBytes = AuthPacketSerializer.CreateResetPasswordPacket(new ResetPasswordRequest
+                {
+                    Email = email ?? string.Empty,
+                    OtpCode = otp ?? string.Empty,
+                    NewPassword = newPassword ?? string.Empty
+                });
+
+                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
+                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                {
+                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    return new ResetPasswordResult { Success = errSuccess, Message = errMsg };
+                }
+                return AuthPacketSerializer.ReadResetPasswordResult(CreatePacket(responseOpcode, payload));
+
+            }
+            catch (Exception ex)
+            {
+                return new ResetPasswordResult { Success = false, Message = $"Lỗi kết nối: {ex.Message}" };
+            }
+        }
+
+        // 4.5. Gửi yêu cầu lấy mã OTP xác thực Email Lúc đăng ký (gui 1005, nhan 2005)
+        public async Task<RegisterOTPResult> RequestRegisterOTPAsync(string email)
         {
             try
             {
                 var writer = new PacketWriter();
-                writer.WriteString(username ?? string.Empty);
-                writer.WriteString(password ?? string.Empty);
-                byte[] requestBytes = writer.Build(Opcode.C2S_LoginRequest);
+                writer.WriteString(email ?? string.Empty);
+                byte[] requestBytes = writer.Build(Opcode.C2S_RegisterOTPRequest);
 
                 var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
                 var reader = new PacketReader(payload);
 
                 if (responseOpcode == Opcode.S2C_ErrorResponse)
                 {
-                    bool errSuccess = reader.ReadBoolean();
-                    string errMsg = reader.ReadString(MaxStringBytes);
-                    reader.EnsureFullyRead();
-                    return new LoginResponse(false, errMsg);
+                    var (errSuccess, _) = ReadErrorResponse(responseOpcode, payload);
+                    return new RegisterOTPResult { Success = errSuccess};
+                }
+
+                bool success = reader.ReadBoolean();
+                string otpCode = reader.ReadString(MaxStringBytes);
+                reader.EnsureFullyRead();
+
+                return new RegisterOTPResult{ Success = success, OTPCode = otpCode};
+
+            }
+            catch
+            {
+                return new RegisterOTPResult { Success = false};
+            }
+        }
+
+        //4.6. Gửi mã otp đẻ xác thực đăng kí
+        public async Task<RegisterOTPVerificationResult> RequestRegisterOTPVerificationAsync(string email, string otpCode)
+        {
+            try
+            {
+                var writer = new PacketWriter();
+                writer.WriteString(email ?? string.Empty);
+                writer.WriteString(otpCode);
+                byte[] requestBytes = writer.Build(Opcode.C2S_RegisterOTPVerificationRequest);
+
+                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
+                var reader = new PacketReader(payload);
+
+                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                {
+                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    return new RegisterOTPVerificationResult { Success = errSuccess, Message = errMsg };
                 }
 
                 bool success = reader.ReadBoolean();
                 string message = reader.ReadString(MaxStringBytes);
-                int userId = 0;
-                string loggedInUsername = string.Empty;
-
-                if (success)
-                {
-                    userId = reader.ReadInt32();
-                    loggedInUsername = reader.ReadString(MaxStringBytes);
-                }
                 reader.EnsureFullyRead();
 
-                return new LoginResponse(success, message, userId, loggedInUsername);
+                return new RegisterOTPVerificationResult { Success = success, Message = message};
+
             }
-            catch (Exception ex)
+            catch
             {
-                return new LoginResponse(false, $"Lỗi kết nối: {ex.Message}");
+                return new RegisterOTPVerificationResult { Success = false, Message = "Đã xảy ra lỗi." };
             }
         }
 
-        // 4.2. Đăng ký (Gửi 1002 -> Nhận 2002)
-        public async Task<BasicResponse> RegisterAsync(string username, string email, string password)
-        {
-            try
-            {
-                var writer = new PacketWriter();
-                writer.WriteString(username ?? string.Empty);
-                writer.WriteString(email ?? string.Empty);
-                writer.WriteString(password ?? string.Empty);
-                byte[] requestBytes = writer.Build(Opcode.C2S_RegisterRequest);
-
-                return await ProcessBasicResponseAsync(requestBytes);
-            }
-            catch (Exception ex)
-            {
-                return new BasicResponse(false, $"Lỗi kết nối: {ex.Message}");
-            }
-        }
-
-        // 4.3. Quên mật khẩu / Yêu cầu mã OTP (Gửi 1003 -> Nhận 2003)
-        public async Task<BasicResponse> RequestPasswordResetAsync(string email)
-        {
-            try
-            {
-                var writer = new PacketWriter();
-                writer.WriteString(email ?? string.Empty);
-                byte[] requestBytes = writer.Build(Opcode.C2S_ForgotPasswordRequest);
-
-                return await ProcessBasicResponseAsync(requestBytes);
-            }
-            catch (Exception ex)
-            {
-                return new BasicResponse(false, $"Lỗi kết nối: {ex.Message}");
-            }
-        }
-
-        // 4.4. Đặt lại mật khẩu bằng OTP (Gửi 1004 -> Nhận 2004)
-        public async Task<BasicResponse> ResetPasswordAsync(string email, string otp, string newPassword)
-        {
-            try
-            {
-                var writer = new PacketWriter();
-                writer.WriteString(email ?? string.Empty);
-                writer.WriteString(otp ?? string.Empty);
-                writer.WriteString(newPassword ?? string.Empty);
-                byte[] requestBytes = writer.Build(Opcode.C2S_ResetPasswordRequest);
-
-                return await ProcessBasicResponseAsync(requestBytes);
-            }
-            catch (Exception ex)
-            {
-                return new BasicResponse(false, $"Lỗi kết nối: {ex.Message}");
-            }
-        }
-
-        // Hàm dùng chung để bóc tách gói phản hồi cơ bản (Bool + String)
-        private async Task<BasicResponse> ProcessBasicResponseAsync(byte[] requestBytes)
-        {
-            var (_, payload) = await SendRequestAsync(requestBytes);
-            var reader = new PacketReader(payload);
-
-            bool success = reader.ReadBoolean();
-            string message = reader.ReadString(MaxStringBytes);
-            reader.EnsureFullyRead();
-
-            return new BasicResponse(success, message);
-        }
 
         // Đảm bảo đọc đủ số byte từ TCP Stream
         private static async Task<int> ReadExactAsync(NetworkStream stream, byte[] buffer, int count, CancellationToken token)
@@ -261,6 +325,12 @@ namespace PentagonLauncher.Launcher.Networking
             }
             return totalRead;
         }
+
+        private static Packet CreatePacket(Opcode opcode, byte[] payload) =>
+            new(new PacketHeader(payload.Length + PacketConstants.HeaderSize, opcode), payload);
+
+        private static (bool Success, string Message) ReadErrorResponse(Opcode opcode, byte[] payload) =>
+            ErrorPacketSerializer.ReadErrorResponsePacket(CreatePacket(opcode, payload));
 
         public void Dispose()
         {

@@ -3,7 +3,9 @@ using System.Drawing;
 using System.Linq;
 using System.Net.Mail;
 using System.Windows.Forms;
-using PentagonLauncher.Launcher.Services;
+using PentagonLauncher.Launcher.Networking;
+using PentagonLauncher.Shared.Interfaces;
+using PentagonLauncher.Shared.Models.Authentication;
 
 namespace PentagonLauncher.Launcher.Forms;
 
@@ -14,14 +16,15 @@ namespace PentagonLauncher.Launcher.Forms;
 /// </summary>
 public partial class RegisterForm : Form
 {
+    private readonly LauncherTcpClient client = LauncherTcpClient.Shared;
     private readonly System.Windows.Forms.Timer _clock = new() { Interval = 1000 };
     private readonly TextBox[] _digits;
-    private DateTime _expiresAtUtc;
-    private DateTime _resendAvailableAtUtc;
     private string _requestedEmail = "";
     private string _verifiedEmail = "";
     private string _verificationToken = "";
     private bool _changingOtp;
+
+    private bool actuallyVerified = false;
     private bool _busy;
     private bool _requestPending;
 
@@ -60,8 +63,6 @@ public partial class RegisterForm : Form
         _verifiedEmail = "";
         _requestedEmail = "";
         _requestPending = false;
-        _expiresAtUtc = default;
-        _resendAvailableAtUtc = default;
         foreach (TextBox digit in _digits) digit.Clear();
         lblOtpStatus.Text = "Nhấn Gửi mã để xác minh email.";
         lblStatus.Text = "";
@@ -73,22 +74,17 @@ public partial class RegisterForm : Form
     private void UpdateControls()
     {
         if (IsDisposed) return;
-        bool verified = _verificationToken.Length > 0;
-        bool active = _requestPending && DateTime.UtcNow < _expiresAtUtc && !verified;
-        TimeSpan remain = _expiresAtUtc - DateTime.UtcNow;
-        if (remain < TimeSpan.Zero) remain = TimeSpan.Zero;
-        int cooldown = _requestPending ?
-            Math.Max(0, (int)Math.Ceiling((_resendAvailableAtUtc - DateTime.UtcNow).TotalSeconds)) : 0;
+        bool verified = actuallyVerified;
+        bool active = _requestPending  && !verified;
 
-        lblCountdown.Text = verified ? "Email đã xác minh" : _requestPending
-            ? $"Còn lại: {remain.Minutes:00}:{remain.Seconds:00}" : "Mã có hiệu lực: 05:00";
+        lblCountdown.Text = verified ? "Email đã xác minh" : "Email chưa xác minh";
         lblCountdown.ForeColor = verified ? Color.FromArgb(92, 232, 180) : Color.FromArgb(64, 217, 255);
         lblOtpState.Text = verified ? "Đã xác minh" : _requestPending && !active
             ? "Mã hết hạn" : "Chưa xác minh";
         lblOtpState.ForeColor = verified ? Color.FromArgb(92, 232, 180) : Color.FromArgb(247, 164, 179);
-        btnSendOtp.Text = verified ? "Đã xác minh" : cooldown > 0
-            ? $"Gửi lại ({cooldown}s)" : _requestPending ? "Gửi lại mã" : "Gửi mã";
-        btnSendOtp.Enabled = !_busy && !verified && cooldown == 0;
+        btnSendOtp.Text = verified ? "Đã xác minh" : true
+            ? $"Gửi lại (0s)" : _requestPending ? "Gửi lại mã" : "Gửi mã";
+        btnSendOtp.Enabled = !_busy && !verified;
         btnVerifyOtp.Enabled = !_busy && active && _digits.All(d => d.TextLength == 1);
         foreach (TextBox digit in _digits) digit.Enabled = !_busy && active;
         txtUsername.Enabled = !_busy;
@@ -97,12 +93,18 @@ public partial class RegisterForm : Form
         txtConfirm.Enabled = !_busy;
         btnRegister.Enabled = !_busy;
         lnkBack.Enabled = !_busy;
-        if (_requestPending && !active && !verified)
-            lblOtpStatus.Text = "Mã đã hết hạn. Nhấn Gửi lại mã để thử tiếp.";
     }
 
     private async void btnSendOtp_Click(object? sender, EventArgs e)
     {
+        try
+        {
+            await client.ConnectAsync();
+        }
+        catch
+        {
+            MessageBox.Show("Khong ket noi duoc voi may chu");
+        }
         if (_busy || _verificationToken.Length > 0) return;
         string email = txtEmail.Text.Trim();
         if (!IsValidEmail(email))
@@ -115,19 +117,17 @@ public partial class RegisterForm : Form
         UpdateControls();
         try
         {
-            RegistrationOtpResult result = _requestPending &&
+            RegisterOTPResult result = _requestPending &&
                 email.Equals(_requestedEmail, StringComparison.OrdinalIgnoreCase)
-                ? await Program.Auth.ResendRegistrationOtpAsync(email)
-                : await Program.Auth.RequestRegistrationOtpAsync(email);
+                ? await client.RequestRegisterOTPAsync(email)
+                : await client.RequestRegisterOTPAsync(email);
             if (IsDisposed) return;
-            if (!result.Success) { lblOtpStatus.Text = result.Message; return; }
+            if (!result.Success) { lblOtpStatus.Text = "Đã xảy ra lỗi"; return; }
             _requestedEmail = email;
             _requestPending = true;
-            _expiresAtUtc = result.ExpiresAtUtc;
-            _resendAvailableAtUtc = result.ResendAvailableAtUtc;
             _clock.Start();
             foreach (TextBox digit in _digits) digit.Clear();
-            lblOtpStatus.Text = result.Message;
+            lblOtpStatus.Text = $"Đã gửi yêu cầu và nhận mã OTP: {result.OTPCode}";
             _digits[0].Focus();
         }
         catch (Exception ex) { lblOtpStatus.Text = $"Không gửi được OTP: {ex.Message}"; }
@@ -184,7 +184,7 @@ public partial class RegisterForm : Form
 
     private async void btnVerifyOtp_Click(object? sender, EventArgs e)
     {
-        if (_busy || !_requestPending || DateTime.UtcNow >= _expiresAtUtc) return;
+        if (_busy || !_requestPending) return;
         string otp = string.Concat(_digits.Select(x => x.Text));
         if (otp.Length != 6 || !otp.All(ch => ch >= '0' && ch <= '9'))
         {
@@ -195,12 +195,12 @@ public partial class RegisterForm : Form
         UpdateControls();
         try
         {
-            EmailVerificationResult result = await Program.Auth.VerifyRegistrationOtpAsync(_requestedEmail, otp);
+            RegisterOTPVerificationResult result = await client.RequestRegisterOTPVerificationAsync(_requestedEmail, otp);
             if (IsDisposed) return;
             if (!result.Success) { lblOtpStatus.Text = result.Message; return; }
-            _verificationToken = result.VerificationToken;
             _verifiedEmail = _requestedEmail;
             _requestPending = false;
+            actuallyVerified = result.Success;
             _clock.Stop();
             lblOtpStatus.Text = "Email đã xác minh. Nhập mật khẩu và Đăng ký.";
             lblStatus.Text = "";
@@ -217,7 +217,7 @@ public partial class RegisterForm : Form
         string password = txtPassword.Text;
         if (username.Length is < 3 or > 20) { ShowError("Username phải có 3–20 ký tự."); txtUsername.Focus(); return; }
         if (!IsValidEmail(email)) { ShowError("Email không hợp lệ."); txtEmail.Focus(); return; }
-        if (_verificationToken.Length == 0 || !email.Equals(_verifiedEmail, StringComparison.OrdinalIgnoreCase))
+        if ( !actuallyVerified || !email.Equals(_verifiedEmail, StringComparison.OrdinalIgnoreCase))
         { ShowError("Vui lòng xác minh Email trước khi đăng ký."); return; }
         if (password.Length < 6) { ShowError("Mật khẩu phải có tối thiểu 6 ký tự."); txtPassword.Focus(); return; }
         if (password != txtConfirm.Text) { ShowError("Hai mật khẩu chưa trùng khớp."); txtConfirm.Focus(); return; }
@@ -225,7 +225,7 @@ public partial class RegisterForm : Form
         UpdateControls();
         try
         {
-            AuthResult result = await Program.Auth.RegisterVerifiedAsync(username, email, password, _verificationToken);
+            var result = await client.RegisterAsync(username, email, password);
             if (IsDisposed) return;
             if (!result.Success)
             {
@@ -234,7 +234,7 @@ public partial class RegisterForm : Form
                     ResetVerification();
                 return;
             }
-            VerifiedUsername = result.Username;
+            VerifiedUsername = username;
             using var success = new ResultForm(true, "Tài khoản của bạn đã được tạo. Hãy đăng nhập để bắt đầu!", "Đăng ký thành công!");
             success.ShowDialog(this);
             DialogResult = DialogResult.OK;

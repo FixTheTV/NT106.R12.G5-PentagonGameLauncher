@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.Text;
 using PentagonLauncher.Shared.Models.Authentication;
 // chuyển model Authentication thành packet, phụ trách các Opcode 1001-1004, 2001-2004.
-namespace PentagonLauncher.Shared.Protocol
+namespace PentagonLauncher.Shared.Protocol.Serializers
 {
     public static class AuthPacketSerializer
     {

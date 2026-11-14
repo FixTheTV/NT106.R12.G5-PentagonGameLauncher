@@ -5,20 +5,17 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using PentagonLauncher.Shared.Protocol;
+using PentagonLauncher.Shared.Protocol.Serializers;
+using PentagonLauncher.Shared.Models.Authentication;
+using PentagonLauncher.Backend.Services;
 
 namespace PentagonLauncher.Backend.Networking
 {
     public class LauncherTcpServer
     {
-        private readonly int _port = 12345;
-        private TcpListener? _listener;
-        private CancellationTokenSource? _cts;
-
+        private  string justSendOtp = string.Empty;
         private readonly SessionManager _sessionManager;
         private readonly AuthService _authService;
-
-        // Giới hạn độ dài byte tối đa khi đọc chuỗi qua PacketReader
-        private const int MaxStringBytes = 256;
 
         public LauncherTcpServer(SessionManager sessionManager, AuthService authService)
         {
@@ -69,7 +66,7 @@ namespace PentagonLauncher.Backend.Networking
                 // Gửi gói lỗi 9000 (S2C_ErrorResponse) về cho Client trước khi ngắt kết nối
                 try
                 {
-                    byte[] errorPacket = BuildBasicResponsePacket(Opcode.S2C_ErrorResponse, false, pEx.Message);
+                    byte[] errorPacket = ErrorPacketSerializer.CreateErrorResponsePacket(false, pEx.Message);
                     await peer.SendPacketAsync(errorPacket);
                 }
                 catch { /* Bỏ qua nếu socket đã hỏng */ }
@@ -93,23 +90,20 @@ namespace PentagonLauncher.Backend.Networking
         // Xây dựng cơ chế Request-Response (Gọi PacketReader, AuthService, PacketWriter)
         private async Task HandlePacketAsync(ClientPeer peer, Opcode opcode, byte[] payload)
         {
-            var reader = new PacketReader(payload);
+            Packet packet = new(new PacketHeader(payload.Length + PacketConstants.HeaderSize, opcode), payload);
 
             switch (opcode)
             {
                 case Opcode.C2S_Pong: // 1000
                 {
-                    reader.EnsureFullyRead();
+                    ConnectionPacketSerializer.ReadPongPacket(packet);
                     break;
                 }
 
                 case Opcode.C2S_LoginRequest: // 1001
                 {
-                    string username = reader.ReadString(MaxStringBytes);
-                    string password = reader.ReadString(MaxStringBytes);
-                    reader.EnsureFullyRead();
-
-                    var result = await _authService.LoginAsync(username, password);
+                    LoginRequest request = AuthPacketSerializer.ReadLoginRequest(packet);
+                    var result = await _authService.LoginAsync(request);
 
                     if (result.Success)
                     {
@@ -121,57 +115,89 @@ namespace PentagonLauncher.Backend.Networking
                     {
                         // Đăng nhập thất bại: Giữ nguyên State = Connected
                         peer.State = ClientState.Connected;
-                        Console.WriteLine($"[Auth] Đăng nhập thất bại ({username}): {result.Message}");
+                        Console.WriteLine($"[Auth] Đăng nhập thất bại ({request.Username}): {result.Message}");
                     }
 
                     // Gửi gói 2001 (S2C_LoginResult) về cho Thanh Hiền
-                    byte[] responsePacket = BuildLoginResultPacket(result.Success, result.Message, result.UserId, result.Username);
+                    byte[] responsePacket = AuthPacketSerializer.CreateLoginResultPacket(result);
                     await peer.SendPacketAsync(responsePacket);
                     break;
                 }
 
                 case Opcode.C2S_RegisterRequest: // 1002
                 {
-                    string username = reader.ReadString(MaxStringBytes);
-                    string email = reader.ReadString(MaxStringBytes);
-                    string password = reader.ReadString(MaxStringBytes);
-                    reader.EnsureFullyRead();
-
-                    var result = await _authService.RegisterAsync(username, email, password);
+                    RegisterRequest request = AuthPacketSerializer.ReadRegisterRequest(packet);
+                    var result = await _authService.RegisterAsync(request);
 
                     // Gửi gói 2002 (S2C_RegisterResult)
-                    byte[] responsePacket = BuildBasicResponsePacket(Opcode.S2C_RegisterResult, result.Success, result.Message);
+                    byte[] responsePacket = AuthPacketSerializer.CreateRegisterResultPacker(result);
                     await peer.SendPacketAsync(responsePacket);
                     break;
                 }
 
                 case Opcode.C2S_ForgotPasswordRequest: // 1003
                 {
-                    string email = reader.ReadString(MaxStringBytes);
-                    reader.EnsureFullyRead();
-
-                    var result = await _authService.RequestPasswordResetAsync(email);
+                    ForgotPasswordRequest request = AuthPacketSerializer.ReadForgotPasswordRequest(packet);
+                    var result = await _authService.RequestPasswordResetAsync(request);
 
                     // Gửi gói 2003 (S2C_ForgotPasswordResult)
-                    byte[] responsePacket = BuildBasicResponsePacket(Opcode.S2C_ForgotPasswordResult, result.Success, result.Message);
+                    byte[] responsePacket = AuthPacketSerializer.CreateForgotPasswordResultPacket(result);
                     await peer.SendPacketAsync(responsePacket);
                     break;
                 }
 
                 case Opcode.C2S_ResetPasswordRequest: // 1004
                 {
-                    string email = reader.ReadString(MaxStringBytes);
-                    string otp = reader.ReadString(MaxStringBytes);
-                    string newPassword = reader.ReadString(MaxStringBytes);
-                    reader.EnsureFullyRead();
-
-                    var result = await _authService.ResetPasswordAsync(email, otp, newPassword);
+                    ResetPasswordRequest request = AuthPacketSerializer.ReadResetPasswordRequest(packet);
+                    var result = await _authService.ResetPasswordAsync(request);
 
                     // Gửi gói 2004 (S2C_ResetPasswordResult)
-                    byte[] responsePacket = BuildBasicResponsePacket(Opcode.S2C_ResetPasswordResult, result.Success, result.Message);
+                    byte[] responsePacket = AuthPacketSerializer.CreateResetPasswordResultPacket(result);
                     await peer.SendPacketAsync(responsePacket);
                     break;
                 }
+
+                case Opcode.C2S_RegisterOTPRequest: //1005
+                {
+                        PacketReader reader = new(packet.Payload);
+                        string email = reader.ReadString(PacketConstants.MaximunEmailByteLength);
+                        reader.EnsureFullyRead();
+
+                        string otpCode = Random.Shared.Next(100000, 1000000).ToString();
+                        justSendOtp = otpCode;
+                        var writer = new PacketWriter();
+                        writer.WriteBoolean(true);
+                        writer.WriteString(otpCode ?? string.Empty);
+                        
+                        byte[] responsepacket = writer.Build(Opcode.S2C_RegisterOTPResult);
+                        await peer.SendPacketAsync(responsepacket);
+                        break;
+                }
+
+                case Opcode.C2S_RegisterOTPVerificationRequest: //1006
+                    {
+                        PacketReader reader = new(packet.Payload);
+                        string email = reader.ReadString(PacketConstants.MaximunEmailByteLength);
+                        string otpCode = reader.ReadString(PacketConstants.MaximumOtpcodeByteLength);
+                        reader.EnsureFullyRead();
+
+                        var writer = new PacketWriter();
+                        if (justSendOtp == otpCode)
+                        {
+                            writer.WriteBoolean(true);
+                            writer.WriteString("ngon luon");
+                        }
+                        else
+                        {
+                            writer.WriteBoolean(false);
+                            writer.WriteString("otp sai");
+                        }
+                        
+
+                        byte[] responsepacket = writer.Build(Opcode.S2C_RegisterOTPVerificationResult);
+                        await peer.SendPacketAsync(responsepacket);
+                        break;
+                    }
 
                 default:
                     Console.WriteLine($"[Warning] Opcode chưa được hỗ trợ ở Sprint 1: {opcode}");
@@ -192,29 +218,5 @@ namespace PentagonLauncher.Backend.Networking
             return totalRead;
         }
 
-        // Đóng gói gói tin 2001 (S2C_LoginResult) bằng PacketWriter của Minh Hiếu
-        private static byte[] BuildLoginResultPacket(bool success, string message, int userId, string username)
-        {
-            var writer = new PacketWriter();
-            writer.WriteBoolean(success);
-            writer.WriteString(message ?? string.Empty);
-
-            if (success)
-            {
-                writer.WriteInt32(userId);
-                writer.WriteString(username ?? string.Empty);
-            }
-
-            return writer.Build(Opcode.S2C_LoginResult);
-        }
-
-        // Đóng gói các gói phản hồi chuẩn (Register, Forgot, Reset, Error) bằng PacketWriter của Minh Hiếu
-        private static byte[] BuildBasicResponsePacket(Opcode opcode, bool success, string message)
-        {
-            var writer = new PacketWriter();
-            writer.WriteBoolean(success);
-            writer.WriteString(message ?? string.Empty);
-            return writer.Build(opcode);
-        }
     }
 }

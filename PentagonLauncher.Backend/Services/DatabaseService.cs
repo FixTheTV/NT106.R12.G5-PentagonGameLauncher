@@ -2,12 +2,12 @@
 using System.Threading.Tasks;    //hỗ trợ cho lậop trình BẤT ĐỒNG BỘ: với Task, async/await, giúp chương trình thực hiện các tác vụ nặng (truy vấn dl, đọc ghi file) ở chế độ nền mà không làm đơ giao diện người dùng
 using MySqlConnector;
 
-namespace PentagonLauncher.Backend
+namespace PentagonLauncher.Backend.Services
 {
     public class DatabaseService
     {
         // Chuỗi kết nối đến MySQL cục bộ trên máy tính của mình  (thay đổi user/pass nếu MySQL của mình có mật khẩu)
-        private readonly string _connectionString = "Server=localhost;Database=tictactoe_db;Uid=root;Pwd=;";
+        private readonly string _connectionString = "Server=localhost;Port=3306;Database=user_management;Uid=root;Pwd=;";
 
         public DatabaseService() { }  //hàm khởi tạo không tham số(mặc định trỏ về localhost,...
 

@@ -9,9 +9,9 @@ namespace PentagonLauncher.Shared.Protocol
         public static void EnsureOpcode(Packet packet, Opcode expectedOP)
         {
             ArgumentNullException.ThrowIfNull(packet);
-            if (packet.opcode != expectedOP)
+            if (packet.Opcode != expectedOP)
             {
-                throw new ProtocolException($"Packet opcode là {packet.opcode}, nhưng cần {expectedOP}");
+                throw new ProtocolException($"Packet opcode là {packet.Opcode}, nhưng cần {expectedOP}");
             }
 
         }

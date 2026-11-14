@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 // Chuyển các nodel Lobby thành packet, phụ trách Opcode 1101-1104, 2101-2103.
-namespace PentagonLauncher.Shared.Protocol
+namespace PentagonLauncher.Shared.Protocol.Serializers
 {
 
     public static class LobbyPacketSerializer

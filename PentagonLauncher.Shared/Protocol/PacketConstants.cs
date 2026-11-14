@@ -7,7 +7,7 @@ namespace PentagonLauncher.Shared.Protocol
     public static class PacketConstants
     {
         public const int HeaderSize = 6;
-        public const int MaximumPackerSize = 65_536;
+        public const int MaximumPacketSize = 65_536;
         public const int MaximumUsernameByteLength = 80;
         public const int MaximunEmailByteLength = 1_024;
         public const int MaximumPasswordByteLength = 512;

@@ -11,7 +11,6 @@ namespace PentagonLauncher.Shared.Models.Authentication
         // OTP dac ta gom 6 so
         public string OtpCode { get; init; } = string.Empty;
 
-        // Khong ghi new password vao log
         public string NewPassword { get; init; } = string.Empty;
     }
 }

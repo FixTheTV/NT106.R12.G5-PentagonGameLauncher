@@ -1,8 +1,4 @@
 ﻿using PentagonLauncher.Shared.Models.Authentication;
-using System;
-using System.Collections.Generic;
-using System.Text;
-
 namespace PentagonLauncher.Shared.Interfaces;
 
 public interface IBackendAuthService

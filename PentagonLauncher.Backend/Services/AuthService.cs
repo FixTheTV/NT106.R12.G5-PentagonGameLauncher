@@ -1,11 +1,12 @@
-﻿using System;
+﻿using BCrypt.Net;  //thư viện để băm mật khẩu 1 chiều(HashPassword khi tạo, Verify khi đối chiếu)
+using PentagonLauncher.Shared.Interfaces;
+using PentagonLauncher.Shared.Models.Authentication;//de lấy được file LoginResult.cs va file Longin Result.cs bên .Shared.Models.authentcation , để bổ sung 2 hàm overload (hàm cùng tên nhưng nhận model ) 
+using System;
+using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using BCrypt.Net;  //thư viện để băm mật khẩu 1 chiều(HashPassword khi tạo, Verify khi đối chiếu)
-using PentagonLauncher.Shared.Models.Authentication;//de lấy được file LoginResult.cs va file Longin Result.cs bên .Shared.Models.authentcation , để bổ sung 2 hàm overload (hàm cùng tên nhưng nhận model ) 
-using PentagonLauncher.Shared.Interfaces;
 
-namespace PentagonLauncher.Backend;
+namespace PentagonLauncher.Backend.Services;
 
 public class AuthService: IBackendAuthService
 {
@@ -18,7 +19,6 @@ public class AuthService: IBackendAuthService
         _db = db;
     }
 
-    #region 1. Nhóm Đăng ký & Đăng nhập
 
     // Task: Xây dựng kiểm tra dữ liệu đầu vào (Validate Input)
     public (bool IsValid, string Message) ValidateRegistrationInput(string username, string email, string password)
@@ -113,9 +113,8 @@ public class AuthService: IBackendAuthService
         return (true, $"Tài khoản {username} đã đăng xuất thành công.");
     }
 
-    #endregion
 
-    #region 2. Nhóm Quên & Đặt lại mật khẩu (OTP)
+
 
     // Task: Xây dựng chức năng yêu cầu đặt lại mật khẩu & Gửi mã xác nhận
     public async Task<(bool Success, string Message)> RequestPasswordResetAsync(string email)
@@ -198,8 +197,11 @@ public class AuthService: IBackendAuthService
             Success = res.Success,
             Message = res.Message
         };
-    #endregion
     }
+
+
+
+
 }
 
 

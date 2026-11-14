@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 // Tạo và đọc ping, pong, phụ trách Opcode 1000, 2000.
-namespace PentagonLauncher.Shared.Protocol
+namespace PentagonLauncher.Shared.Protocol.Serializers
 {
     public static class ConnectionPacketSerializer
     {

@@ -1,13 +1,13 @@
-﻿using PentagonLauncher.Shared.Protocol;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 
 namespace PentagonLauncher.Shared.Models.Authentication
 {
-    public sealed class ErrorResponse
+    public sealed class RegisterOTPVerificationResult
     {
-        public ProtocolErrorCode ErrorCode { get; init; }
+        public bool Success { get; init; }
+
         public string Message { get; init; } = string.Empty;
     }
 }

@@ -3,12 +3,13 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Linq;
 using System.Threading.Tasks;
-using PentagonLauncher.Launcher.Services;
+using PentagonLauncher.Launcher.Networking;
 
 namespace PentagonLauncher.Launcher.Forms {
 
     public partial class LoginForm : Form
     {
+        private readonly LauncherTcpClient client = LauncherTcpClient.Shared;
         public LoginForm()
         {
             InitializeComponent();
@@ -26,10 +27,28 @@ namespace PentagonLauncher.Launcher.Forms {
             }
 
             btnLogin.Enabled = false;
-            lblStatus.Text = "Đang đăng nhập...";
+            lblStatus.Text = "Đang kết nối...";
+
             try
             {
-                AuthResult result = await Program.Auth.LoginAsync(username, password);
+                var result = await client.ConnectAsync();
+                if (!result)
+                {
+                    lblStatus.Text = $"Server đang được bảo trì";
+                    btnLogin.Enabled = true;
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                lblStatus.Text = $"Xảy ra lỗi khi kết nối {ex.Message}";
+                btnLogin.Enabled = true;
+                return;
+            }
+
+            try
+            {
+                var result = await client.LoginAsync(username, password);
                 if (!result.Success)
                 {
                     lblStatus.Text = result.Message;

@@ -4,12 +4,15 @@ using System.Windows.Forms;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Net.Mail;
-using PentagonLauncher.Launcher.Services;
+using PentagonLauncher.Launcher.Networking;
+using PentagonLauncher.Shared.Models;
+using PentagonLauncher.Shared.Models.Authentication;
 
 namespace PentagonLauncher.Launcher.Forms;
 
 public partial class ForgotPasswordForm : Form
 {
+    private readonly LauncherTcpClient client = LauncherTcpClient.Shared;
     public ForgotPasswordForm()
     {
         InitializeComponent();
@@ -27,7 +30,7 @@ public partial class ForgotPasswordForm : Form
         btnSend.Enabled = false;
         try
         {
-            AuthResult result = await Program.Auth.RequestPasswordResetAsync(email);
+            var result = await client.RequestPasswordResetAsync(email);
             if (!result.Success) { lblStatus.Text = result.Message; return; }
             using var otp = new OtpForm(email);
             Hide();

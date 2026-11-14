@@ -8,7 +8,6 @@ namespace PentagonLauncher.Shared.Models.Authentication
     {
         public string Username { get; init; } = string.Empty;
         public string Email { get; init; } = string.Empty;
-        // Khong ghi password vao log
         public string Password { get; init; } = string.Empty;
     }
 }

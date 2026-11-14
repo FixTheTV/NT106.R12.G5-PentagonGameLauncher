@@ -19,10 +19,10 @@ namespace PentagonLauncher.Shared.Protocol
                 throw new ProtocolException(
                     $"Packet length không hợp lệ : {totalLength} .");
             }
-            if (totalLength > PacketConstants.MaximumPackerSize)
+            if (totalLength > PacketConstants.MaximumPacketSize)
             {
                 throw new ProtocolException(
-                    $"Packet vượt quá giới hạn {PacketConstants.MaximumPackerSize} bytes ");
+                    $"Packet vượt quá giới hạn {PacketConstants.MaximumPacketSize} bytes ");
             }
             if (!Enum.IsDefined(typeof(Opcode), opcode))
             {
