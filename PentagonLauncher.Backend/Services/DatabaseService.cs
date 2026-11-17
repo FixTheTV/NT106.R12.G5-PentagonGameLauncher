@@ -6,13 +6,11 @@ namespace PentagonLauncher.Backend.Services
 {
     public class DatabaseService
     {
-        // Chuỗi kết nối đến MySQL cục bộ trên máy tính của mình  (thay đổi user/pass nếu MySQL của mình có mật khẩu)
-        private readonly string _connectionString = "Server=localhost;Port=3306;Database=user_management;Uid=root;Pwd=;";
-
-        public DatabaseService() { InitializeDatabase(); }  //hàm khởi tạo không tham số(mặc định trỏ về localhost,...
+        private readonly string _connectionString;
 
         public DatabaseService(string connectionString) //... có tham số : đề khi triển khai thực tế lên máy tính khác(có password MýQL riêng thì truyền chuỗi kết nối trong file cấu hình đó vào hàm này- để chuyển đổi môi trường 
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
             _connectionString = connectionString;
             InitializeDatabase();
         }
@@ -144,12 +142,7 @@ namespace PentagonLauncher.Backend.Services
         {
             using var conn = GetConnection();
 
-            try{
-                conn.Open();
-            }catch (Exception ex){
-                Console.WriteLine($"An error occoured {ex}");
-            }
-            
+            conn.Open();
 
             string createUsersTable = @"
                 CREATE TABLE IF NOT EXISTS users (

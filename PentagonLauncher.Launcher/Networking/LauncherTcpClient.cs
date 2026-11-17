@@ -1,6 +1,7 @@
 using PentagonLauncher.Shared.Models.Authentication;
 using PentagonLauncher.Shared.Protocol;
 using PentagonLauncher.Shared.Protocol.Serializers;
+using PentagonLauncher.Shared.Configuration;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -36,14 +37,18 @@ namespace PentagonLauncher.Launcher.Networking
         public event Action<string>? OnDisconnected;
 
         // 1. KẾT NỐI & NGẮT KẾT NỐI TCP
-        public async Task<bool> ConnectAsync(string host = "127.0.0.1", int port = 12345)
+        public async Task<bool> ConnectAsync(string? host = null, int? port = null)
         {
             if (IsConnected) return true;
+
+            EnvironmentFile.Load();
+            host ??= Environment.GetEnvironmentVariable("SERVER_HOST") ?? "127.0.0.1";
+            port ??= EnvironmentFile.GetPort("SERVER_PORT", 12345);
 
             try
             {
                 _tcpClient = new TcpClient();
-                await _tcpClient.ConnectAsync(host, port);
+                await _tcpClient.ConnectAsync(host, port.Value);
                 _stream = _tcpClient.GetStream();
                 _cts = new CancellationTokenSource();
 
