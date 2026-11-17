@@ -9,11 +9,12 @@ namespace PentagonLauncher.Backend.Services
         // Chuỗi kết nối đến MySQL cục bộ trên máy tính của mình  (thay đổi user/pass nếu MySQL của mình có mật khẩu)
         private readonly string _connectionString = "Server=localhost;Port=3306;Database=user_management;Uid=root;Pwd=;";
 
-        public DatabaseService() { }  //hàm khởi tạo không tham số(mặc định trỏ về localhost,...
+        public DatabaseService() { InitializeDatabase(); }  //hàm khởi tạo không tham số(mặc định trỏ về localhost,...
 
         public DatabaseService(string connectionString) //... có tham số : đề khi triển khai thực tế lên máy tính khác(có password MýQL riêng thì truyền chuỗi kết nối trong file cấu hình đó vào hàm này- để chuyển đổi môi trường 
         {
             _connectionString = connectionString;
+            InitializeDatabase();
         }
 
         //phạm vi private: chỉ cho các hàm nội bộ thuộc class DatabaseService sủ dụng 
@@ -136,6 +137,51 @@ namespace PentagonLauncher.Backend.Services
             cmd.Parameters.AddWithValue("@hash", newPasswordHash);
             cmd.Parameters.AddWithValue("@uid", userId);
             return await cmd.ExecuteNonQueryAsync() > 0;
+        }
+
+
+        private void InitializeDatabase()
+        {
+            using var conn = GetConnection();
+
+            try{
+                conn.Open();
+            }catch (Exception ex){
+                Console.WriteLine($"An error occoured {ex}");
+            }
+            
+
+            string createUsersTable = @"
+                CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(50) NOT NULL UNIQUE,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                password_hash VARCHAR(255) NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );"
+            ;
+
+            string createPasswordResetsTable = @"
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    otp_code VARCHAR(10) NOT NULL,
+                    expires_at DATETIME NOT NULL,
+                    is_used BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+                    CONSTRAINT fk_password_resets_users
+                    FOREIGN KEY (user_id)
+                    REFERENCES users(id)
+                    ON DELETE CASCADE
+                );"
+            ;
+
+            using var cmd = new MySqlCommand(
+                createUsersTable + createPasswordResetsTable, conn
+            );
+
+            cmd.ExecuteNonQuery();
         }
     }
 
