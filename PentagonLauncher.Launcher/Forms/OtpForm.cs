@@ -119,10 +119,10 @@ public partial class OtpForm : Form
         btnVerify.Enabled = false;
         try
         {
-            RegisterOTPVerificationResult verify = await client.RequestRegisterOTPVerificationAsync(_email, code);
-            if (!verify.Success) { lblStatus.Text = verify.Message; return; }
+            RegisterOTPResult verify = await client.RequestRegisterOTPAsync(_email, OTP.OtpPurpose.Registration);
+            if (!verify.Success) { lblStatus.Text = "Yeu cau ma OTP that bai"; return; }
             _clock.Stop();
-            using var reset = new ResetPasswordForm(_email,verify.Message);
+            using var reset = new ResetPasswordForm(_email,verify.OTPCode);
             Hide();
             if (reset.ShowDialog(this) == DialogResult.OK)
             {

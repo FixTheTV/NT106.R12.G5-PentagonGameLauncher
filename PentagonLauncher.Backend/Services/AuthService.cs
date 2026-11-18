@@ -53,11 +53,25 @@ public class AuthService: IBackendAuthService
         if (await _db.IsEmailExistsAsync(email))
             return (false, "Địa chỉ email này đã được sử dụng.");
 
+        int? verifiedOtpId = await _db.GetVerifiedRegistrationOtpIdAsync(email);
+
+        if (verifiedOtpId is null)
+        {
+            return (false, "Email chưa được xác minh OTP hoặc mã đã hết hạn.");
+        }
+
         // Băm mật khẩu bằng BCrypt
         string hash = BCrypt.Net.BCrypt.HashPassword(password);
         bool created = await _db.CreateUserAsync(username, email, hash);
 
-        return created ? (true, "Đăng ký tài khoản thành công.") : (false, "Lỗi khi lưu dữ liệu người dùng.");
+        if (!created)
+        {
+            return (false, "Lỗi khi lưu dữ liệu người dùng.");
+        }
+
+        await _db.MarkOtpUsedAsync(verifiedOtpId.Value);
+
+        return (true, "Đăng ký tài khoản thành công.");
     }
 
     //hàm overload(hàm cùng tên-RegisterAsync nhưng nhận Model): Cùng gọi hàm RegisterAsync, nhưng ko truyền vào 3 biến như ở bên trên, mà truyền vào đối tượng kiểu LoginRequest, thì nó sẽ chạy  hàm này, chứu ko phải hàm trên 
@@ -131,7 +145,7 @@ public class AuthService: IBackendAuthService
         // Task: Xây dựng kiểm tra thời hạn mã xác nhận (hạn 5 phút)
         DateTime expiresAt = DateTime.UtcNow.AddMinutes(5);
 
-        await _db.SaveOtpAsync(userId.Value, otpCode, expiresAt);
+        //await _db.SaveOtpAsync(userId.Value, otpCode, expiresAt);
 
         // In mã OTP ra màn hình Console để chạy demo đồ án môn học
         Console.WriteLine("====================================================");
@@ -183,7 +197,7 @@ public class AuthService: IBackendAuthService
         // 6. Cập nhật mật khẩu mới và đánh dấu OTP đã dùng
         string newHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
         await _db.UpdatePasswordAsync(userId.Value, newHash);
-        await _db.MarkOtpUsedAsync(otpRecord.Value.ResetId);
+        //await _db.MarkOtpUsedAsync(otpRecord.Value.ResetId);
 
         return (true, "Đặt lại mật khẩu thành công! Bạn có thể đăng nhập ngay.");
     }
@@ -197,6 +211,28 @@ public class AuthService: IBackendAuthService
             Success = res.Success,
             Message = res.Message
         };
+    }
+
+
+    public async Task<RegisterOTPResult> VerifyRegisterOTP(string email, string otpCode, OTP.OtpPurpose purpose)
+    {
+        var otpID = await _db.GetValidOtpIdAsync(email,purpose,otpCode);
+
+        if (otpID != null)
+        {
+            var markVerified = await _db.MarkOtpVerifiedAsync(otpID);
+            if (markVerified)
+            {
+                return new RegisterOTPResult { Success = true };
+            }
+        }
+        else
+        {
+            return new RegisterOTPResult { Success = false };
+        }
+
+        return new RegisterOTPResult { Success = false };
+
     }
 
 

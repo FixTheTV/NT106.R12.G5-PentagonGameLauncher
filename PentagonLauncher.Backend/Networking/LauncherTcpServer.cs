@@ -13,14 +13,15 @@ namespace PentagonLauncher.Backend.Networking
 {
     public class LauncherTcpServer
     {
-        private  string justSendOtp = string.Empty;
         private readonly SessionManager _sessionManager;
         private readonly AuthService _authService;
 
-        public LauncherTcpServer(SessionManager sessionManager, AuthService authService)
+        private readonly OTPService _otpService;
+        public LauncherTcpServer(SessionManager sessionManager, AuthService authService, OTPService otpService)
         {
             _sessionManager = sessionManager;
             _authService = authService;
+            _otpService = otpService;
         }
 
         // Hàm bọc trực tiếp TcpClient thành ClientPeer và chạy vòng lặp nhận dữ liệu (khớp với Program.cs của Long)
@@ -160,14 +161,15 @@ namespace PentagonLauncher.Backend.Networking
                 case Opcode.C2S_RegisterOTPRequest: //1005
                 {
                         PacketReader reader = new(packet.Payload);
+                        byte purpose = reader.ReadByte();
                         string email = reader.ReadString(PacketConstants.MaximunEmailByteLength);
                         reader.EnsureFullyRead();
 
-                        string otpCode = Random.Shared.Next(100000, 1000000).ToString();
-                        justSendOtp = otpCode;
+                        OTP otp = await _otpService.CreateRegistrationOTP(email, OTP.OtpPurpose.Registration);
+
+
                         var writer = new PacketWriter();
                         writer.WriteBoolean(true);
-                        writer.WriteString(otpCode ?? string.Empty);
                         
                         byte[] responsepacket = writer.Build(Opcode.S2C_RegisterOTPResult);
                         await peer.SendPacketAsync(responsepacket);
@@ -179,18 +181,21 @@ namespace PentagonLauncher.Backend.Networking
                         PacketReader reader = new(packet.Payload);
                         string email = reader.ReadString(PacketConstants.MaximunEmailByteLength);
                         string otpCode = reader.ReadString(PacketConstants.MaximumOtpcodeByteLength);
+                        OTP.OtpPurpose purpose = (OTP.OtpPurpose)reader.ReadByte();
                         reader.EnsureFullyRead();
 
                         var writer = new PacketWriter();
-                        if (justSendOtp == otpCode)
+
+                        var res = await _authService.VerifyRegisterOTP(email, otpCode, purpose);
+                        if ( res.Success)
                         {
                             writer.WriteBoolean(true);
-                            writer.WriteString("ngon luon");
+                            writer.WriteString("Đã xác thực OTP thành công");
                         }
                         else
                         {
                             writer.WriteBoolean(false);
-                            writer.WriteString("otp sai");
+                            writer.WriteString("Đã xác thực OTP thất bại");
                         }
                         
 

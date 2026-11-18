@@ -22,10 +22,11 @@ namespace PentagonLauncher.Backend
             // Khởi tạo các Service bên Long
             var databaseService = new DatabaseService(EnvironmentSettings.GetDatabaseConnectionString());
             var authService = new AuthService(databaseService);
+            var otpService = new OTPService(databaseService);
 
             // Khởi tạo quản lý phiên và bộ xử lý gói tin bên Khôi
             var sessionManager = new SessionManager();
-            var tcpServer = new LauncherTcpServer(sessionManager, authService);
+            var tcpServer = new LauncherTcpServer(sessionManager, authService, otpService);
 
             // Khôi khởi động TCP Listener lắng nghe kết nối
             TcpListener server = new TcpListener(IPAddress.Any, port);

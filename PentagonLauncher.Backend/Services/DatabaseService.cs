@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading.Tasks;    //hỗ trợ cho lậop trình BẤT ĐỒNG BỘ: với Task, async/await, giúp chương trình thực hiện các tác vụ nặng (truy vấn dl, đọc ghi file) ở chế độ nền mà không làm đơ giao diện người dùng
 using MySqlConnector;
+using PentagonLauncher.Shared.Models.Authentication;
 
 namespace PentagonLauncher.Backend.Services
 {
@@ -87,16 +88,28 @@ namespace PentagonLauncher.Backend.Services
             return null;
         }
 
-        // 6. Lưu mã OTP mới vào bảng password_resets
-        public async Task<bool> SaveOtpAsync(int userId, string otpCode, DateTime expiresAt)
+        public async Task<bool> SaveOTPAsync(string email, OTP otp)
         {
             using var conn = GetConnection();
             await conn.OpenAsync();
             using var cmd = new MySqlCommand(
-                "INSERT INTO password_resets (user_id, otp_code, expires_at) VALUES (@uid, @otp, @exp)", conn);
+                "INSERT INTO otp_requests (email, purpose, otp_code) VALUES (@email, @purpose, @code)", conn);
+
+            cmd.Parameters.AddWithValue("@email", email);
+            cmd.Parameters.AddWithValue("@code", otp.Code);
+            cmd.Parameters.AddWithValue("@purpose", (int)otp.Purpose );
+
+            return await cmd.ExecuteNonQueryAsync() > 0;
+        }
+        // 6. Lưu mã OTP mới vào bảng password_resets
+        public async Task<bool> SavePassResetAsync(int userId)
+        {
+            using var conn = GetConnection();
+            await conn.OpenAsync();
+            using var cmd = new MySqlCommand(
+                "INSERT INTO password_resets (user_id, otp_code) VALUES (@uid)", conn);
             cmd.Parameters.AddWithValue("@uid", userId);
-            cmd.Parameters.AddWithValue("@otp", otpCode);
-            cmd.Parameters.AddWithValue("@exp", expiresAt);
+ 
             return await cmd.ExecuteNonQueryAsync() > 0;
         }
 
@@ -106,12 +119,12 @@ namespace PentagonLauncher.Backend.Services
             using var conn = GetConnection();
             await conn.OpenAsync();
             using var cmd = new MySqlCommand(
-                "SELECT id, otp_code, expires_at FROM password_resets WHERE user_id = @uid AND is_used = 0 ORDER BY created_at DESC LIMIT 1", conn);
+                "SELECT id, otp_code, expired_at FROM password_resets WHERE user_id = @uid AND is_used = 0 ORDER BY created_at DESC LIMIT 1", conn);
             cmd.Parameters.AddWithValue("@uid", userId);
             using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
             {
-                return (reader.GetInt32("id"), reader.GetString("otp_code"), reader.GetDateTime("expires_at"));
+                return (reader.GetInt32("id"), reader.GetString("otp_code"), reader.GetDateTime("expired_at"));
             }
             return null;
         }
@@ -121,8 +134,15 @@ namespace PentagonLauncher.Backend.Services
         {
             using var conn = GetConnection();
             await conn.OpenAsync();
-            using var cmd = new MySqlCommand("UPDATE password_resets SET is_used = 1 WHERE id = @id", conn);
-            cmd.Parameters.AddWithValue("@id", resetId);
+
+            const string sql = """
+                UPDATE otp_requests
+                SET is_used = TRUE
+                WHERE id = @otpId;
+            """;
+
+            using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@otpId", resetId);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -136,6 +156,106 @@ namespace PentagonLauncher.Backend.Services
             cmd.Parameters.AddWithValue("@uid", userId);
             return await cmd.ExecuteNonQueryAsync() > 0;
         }
+
+
+
+
+        // 1. Tìm OTP hợp lệ mà user vừa nhập.
+        // Trả về id của OTP nếu đúng; sai, hết hạn hoặc đã dùng thì trả null.
+     public async Task<int?> GetValidOtpIdAsync(
+            string email,
+            OTP.OtpPurpose purpose,
+            string otpCode)
+        {
+            using var conn = GetConnection();
+            await conn.OpenAsync();
+
+            const string sql = """
+        SELECT id
+        FROM otp_requests
+        WHERE email = @email
+          AND purpose = @purpose
+          AND otp_code = @otpCode
+          AND is_used = FALSE
+          AND expired_at > UTC_TIMESTAMP()
+        ORDER BY created_at DESC
+        LIMIT 1;
+        """;
+
+            using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@email", email.Trim().ToLowerInvariant());
+            cmd.Parameters.AddWithValue("@purpose", (byte)purpose);
+            cmd.Parameters.AddWithValue("@otpCode", otpCode.Trim());
+
+            object? result = await cmd.ExecuteScalarAsync();
+
+            return result is null || result == DBNull.Value
+                ? null
+                : Convert.ToInt32(result);
+        }
+
+
+        // 2. OTP đã nhập đúng: đánh dấu email đã xác minh.
+        // Dùng cho OTP đăng ký.
+        public async Task<bool> MarkOtpVerifiedAsync(int? otpId)
+        {
+            using var conn = GetConnection();
+            await conn.OpenAsync();
+
+            const string sql = """
+        UPDATE otp_requests
+        SET is_verified = TRUE
+        WHERE id = @otpId
+          AND is_used = FALSE;
+        """;
+
+            using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@otpId", otpId);
+
+            return await cmd.ExecuteNonQueryAsync() == 1;
+        }
+
+
+
+
+
+
+        // 3. Trước khi tạo tài khoản: kiểm tra email này đã verify OTP đăng ký chưa.
+        public async Task<int?> GetVerifiedRegistrationOtpIdAsync(string email)
+        {
+            using var conn = GetConnection();
+            await conn.OpenAsync();
+
+            const string sql = """
+        SELECT id
+        FROM otp_requests
+        WHERE email = @email
+          AND purpose = @purpose
+          AND is_verified = TRUE
+          AND is_used = FALSE
+          AND expired_at > UTC_TIMESTAMP()
+        ORDER BY created_at DESC
+        LIMIT 1;
+        """;
+
+            using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@email", email.Trim().ToLowerInvariant());
+            cmd.Parameters.AddWithValue(
+                "@purpose",
+                (byte)OTP.OtpPurpose.Registration);
+
+            object? result = await cmd.ExecuteScalarAsync();
+
+            return result is null || result == DBNull.Value
+                ? null
+                : Convert.ToInt32(result);
+        }
+
+
+
+
+
+
 
 
         private void InitializeDatabase()
@@ -158,20 +278,49 @@ namespace PentagonLauncher.Backend.Services
                 CREATE TABLE IF NOT EXISTS password_resets (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     user_id INT NOT NULL,
-                    otp_code VARCHAR(10) NOT NULL,
-                    expires_at DATETIME NOT NULL,
-                    is_used BOOLEAN NOT NULL DEFAULT FALSE,
+                    otp_request_id INT NOT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
                     CONSTRAINT fk_password_resets_users
                     FOREIGN KEY (user_id)
                     REFERENCES users(id)
+                    ON DELETE CASCADE,
+
+                    CONSTRAINT fk_password_resets_otps
+                    FOREIGN KEY (otp_request_id)
+                    REFERENCES otp_requests(id)
                     ON DELETE CASCADE
                 );"
             ;
 
+
+            string createOTPRequestsTable = @"
+                CREATE TABLE IF NOT EXISTS otp_requests (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    email VARCHAR(255) NOT NULL,
+                    purpose TINYINT UNSIGNED NOT NULL,
+                    otp_code CHAR(6) NOT NULL,
+                    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_used BOOLEAN NOT NULL DEFAULT FALSE,
+
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+                    expired_at DATETIME
+                        GENERATED ALWAYS AS (
+                        DATE_ADD(created_at, INTERVAL 5 MINUTE)
+                    ) STORED,
+
+                    INDEX ix_otp_lookup (
+                        email,
+                        purpose,
+                        is_used,
+                        expired_at
+                    )
+               );"
+                ;
+
             using var cmd = new MySqlCommand(
-                createUsersTable + createPasswordResetsTable, conn
+                createUsersTable + createOTPRequestsTable + createPasswordResetsTable, conn
             );
 
             cmd.ExecuteNonQuery();

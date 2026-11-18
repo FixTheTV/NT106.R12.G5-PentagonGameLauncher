@@ -16,7 +16,6 @@ namespace PentagonLauncher.Launcher.Networking
     //public record BasicResponse(bool Success, string Message);
     //public record LoginResponse(bool Success, string Message, int UserId = 0, string Username = "");
 
-    public record DemoOTPRequestResponse(bool Success, string Message, DateTime ExpiresAtUtc);
 
     public class LauncherTcpClient : IDisposable
     {
@@ -255,15 +254,18 @@ namespace PentagonLauncher.Launcher.Networking
         }
 
         // 4.5. Gửi yêu cầu lấy mã OTP xác thực Email Lúc đăng ký (gui 1005, nhan 2005)
-        public async Task<RegisterOTPResult> RequestRegisterOTPAsync(string email)
+        public async Task<RegisterOTPResult> RequestRegisterOTPAsync(string email, OTP.OtpPurpose purpose)
         {
             try
             {
                 var writer = new PacketWriter();
+                writer.WriteByte((byte)purpose);
                 writer.WriteString(email ?? string.Empty);
                 byte[] requestBytes = writer.Build(Opcode.C2S_RegisterOTPRequest);
 
                 var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
+
+
                 var reader = new PacketReader(payload);
 
                 if (responseOpcode == Opcode.S2C_ErrorResponse)
@@ -273,10 +275,9 @@ namespace PentagonLauncher.Launcher.Networking
                 }
 
                 bool success = reader.ReadBoolean();
-                string otpCode = reader.ReadString(MaxStringBytes);
                 reader.EnsureFullyRead();
 
-                return new RegisterOTPResult{ Success = success, OTPCode = otpCode};
+                return new RegisterOTPResult{ Success = success};
 
             }
             catch
@@ -286,16 +287,19 @@ namespace PentagonLauncher.Launcher.Networking
         }
 
         //4.6. Gửi mã otp đẻ xác thực đăng kí
-        public async Task<RegisterOTPVerificationResult> RequestRegisterOTPVerificationAsync(string email, string otpCode)
+        public async Task<RegisterOTPVerificationResult> RequestRegisterOTPVerificationAsync(string email, string otpCode, OTP.OtpPurpose purpose)
         {
             try
             {
                 var writer = new PacketWriter();
                 writer.WriteString(email ?? string.Empty);
                 writer.WriteString(otpCode);
+                writer.WriteByte((byte)purpose);
+
                 byte[] requestBytes = writer.Build(Opcode.C2S_RegisterOTPVerificationRequest);
 
                 var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
+
                 var reader = new PacketReader(payload);
 
                 if (responseOpcode == Opcode.S2C_ErrorResponse)
