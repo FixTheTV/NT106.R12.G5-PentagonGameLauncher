@@ -95,7 +95,7 @@ namespace PentagonLauncher.Backend.Services
             using var cmd = new MySqlCommand(
                 "INSERT INTO otp_requests (email, purpose, otp_code) VALUES (@email, @purpose, @code)", conn);
 
-            cmd.Parameters.AddWithValue("@email", email);
+            cmd.Parameters.AddWithValue("@email", email.Trim().ToLowerInvariant());  //cắt chuỗi thừa cuẩ email để giống trong 2 hàm tìm kiếm Otp là GetValidOtpIdAsync và GetVerifiedRegistrationOtpIdAsync
             cmd.Parameters.AddWithValue("@code", otp.Code);
             cmd.Parameters.AddWithValue("@purpose", (int)otp.Purpose );
 
@@ -177,7 +177,7 @@ namespace PentagonLauncher.Backend.Services
           AND purpose = @purpose
           AND otp_code = @otpCode
           AND is_used = FALSE
-          AND expired_at > UTC_TIMESTAMP()
+          AND expired_at > CURRENT_TIMESTAMP
         ORDER BY created_at DESC
         LIMIT 1;
         """;
@@ -233,7 +233,7 @@ namespace PentagonLauncher.Backend.Services
           AND purpose = @purpose
           AND is_verified = TRUE
           AND is_used = FALSE
-          AND expired_at > UTC_TIMESTAMP()
+          AND expired_at > CURRENT_TIMESTAMP
         ORDER BY created_at DESC
         LIMIT 1;
         """;
