@@ -203,13 +203,11 @@ namespace PentagonLauncher.Shared.Protocol.Serializers
             ArgumentNullException.ThrowIfNull(request);
 
             ValidateEmail(request.Email);
-            ValidateOtpCode(request.OtpCode);
             ValidatePassword(request.NewPassword);
 
             PacketWriter writer = new();
 
             writer.WriteString(request.Email);
-            writer.WriteString(request.OtpCode);
             writer.WriteString(request.NewPassword);
 
             return writer.Build(Opcode.C2S_ResetPasswordRequest);
@@ -225,8 +223,6 @@ namespace PentagonLauncher.Shared.Protocol.Serializers
             string email = reader.ReadString(
                 PacketConstants.MaximunEmailByteLength);
 
-            string otpCode = reader.ReadString(
-                PacketConstants.MaximumOtpcodeByteLength);
 
             string newPassword = reader.ReadString(
                 PacketConstants.MaximumPasswordByteLength);
@@ -234,13 +230,11 @@ namespace PentagonLauncher.Shared.Protocol.Serializers
             reader.EnsureFullyRead();
 
             ValidateEmail(email);
-            ValidateOtpCode(otpCode);
             ValidatePassword(newPassword);
 
             return new ResetPasswordRequest
             {
                 Email = email,
-                OtpCode = otpCode,
                 NewPassword = newPassword
             };
         }

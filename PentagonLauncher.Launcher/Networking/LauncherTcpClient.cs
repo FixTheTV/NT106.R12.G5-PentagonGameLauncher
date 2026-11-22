@@ -23,6 +23,7 @@ namespace PentagonLauncher.Launcher.Networking
         private TcpClient? _tcpClient;
         private NetworkStream? _stream;
         private CancellationTokenSource? _cts;
+        private Task? _receiveTask;
 
         // Hàng đợi đồng bộ cho cơ chế Request - Response
         private TaskCompletionSource<(Opcode Opcode, byte[] Payload)>? _pendingRequest;
@@ -39,6 +40,9 @@ namespace PentagonLauncher.Launcher.Networking
         public async Task<bool> ConnectAsync(string? host = null, int? port = null)
         {
             if (IsConnected) return true;
+            // The previous receive loop must finish before replacing its socket.
+            if (_receiveTask is not null) await _receiveTask;
+            _cts?.Dispose();
 
             EnvironmentFile.Load();
             host ??= Environment.GetEnvironmentVariable("SERVER_HOST") ?? "127.0.0.1";
@@ -52,7 +56,7 @@ namespace PentagonLauncher.Launcher.Networking
                 _cts = new CancellationTokenSource();
 
                 // Khởi chạy vòng lặp nhận dữ liệu chạy ngầm bên dưới Client
-                _ = Task.Run(() => ReceiveLoopAsync(_cts.Token));
+                _receiveTask = ReceiveLoopAsync(_cts.Token);
                 return true;
             }
             catch (Exception ex)
@@ -65,11 +69,20 @@ namespace PentagonLauncher.Launcher.Networking
         public void Disconnect()
         {
             _cts?.Cancel();
+            _pendingRequest?.TrySetException(new IOException("Kết nối đã đóng. Vui lòng đăng nhập lại."));
             try
             {
                 _tcpClient?.Close();
             }
             catch { /* Bỏ qua lỗi khi đóng socket */ }
+        }
+
+        public async Task LogoutAsync()
+        {
+            Disconnect();
+            if (_receiveTask is not null) await _receiveTask;
+            _stream = null;
+            _tcpClient = null;
         }
 
         // 2. VÒNG LẶP NHẬN DỮ LIỆU TỪ SERVER (Chạy ngầm)
@@ -114,8 +127,9 @@ namespace PentagonLauncher.Launcher.Networking
             }
             finally
             {
+                bool intentional = token.IsCancellationRequested;
                 Disconnect();
-                OnDisconnected?.Invoke("Đã mất kết nối với máy chủ Pentagon Launcher.");
+                if (!intentional) OnDisconnected?.Invoke("Đã mất kết nối với máy chủ Pentagon Launcher.");
             }
         }
 
@@ -212,6 +226,7 @@ namespace PentagonLauncher.Launcher.Networking
                 });
 
                 var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
+
                 if (responseOpcode == Opcode.S2C_ErrorResponse)
                 {
                     var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
@@ -227,14 +242,13 @@ namespace PentagonLauncher.Launcher.Networking
 
 
         // 4.4. Đặt lại mật khẩu bằng OTP (Gửi 1004 -> Nhận 2004)
-        public async Task<ResetPasswordResult> ResetPasswordAsync(string email, string otp, string newPassword)
+        public async Task<ResetPasswordResult> ResetPasswordAsync(string email, string newPassword)
         {
             try
             {
                 byte[] requestBytes = AuthPacketSerializer.CreateResetPasswordPacket(new ResetPasswordRequest
                 {
                     Email = email ?? string.Empty,
-                    OtpCode = otp ?? string.Empty,
                     NewPassword = newPassword ?? string.Empty
                 });
 
@@ -254,7 +268,7 @@ namespace PentagonLauncher.Launcher.Networking
         }
 
         // 4.5. Gửi yêu cầu lấy mã OTP xác thực Email Lúc đăng ký (gui 1005, nhan 2005)
-        public async Task<RegisterOTPResult> RequestRegisterOTPAsync(string email, OTP.OtpPurpose purpose)
+        public async Task<OtpResult> RequestRegisterOTPAsync(string email, OTP.OtpPurpose purpose)
         {
             try
             {
@@ -271,23 +285,20 @@ namespace PentagonLauncher.Launcher.Networking
                 if (responseOpcode == Opcode.S2C_ErrorResponse)
                 {
                     var (errSuccess, _) = ReadErrorResponse(responseOpcode, payload);
-                    return new RegisterOTPResult { Success = errSuccess};
+                    return new OtpResult { Success = errSuccess};
                 }
 
-                bool success = reader.ReadBoolean();
-                reader.EnsureFullyRead();
-
-                return new RegisterOTPResult{ Success = success};
+                return OtpPacketSerializer.ReadResult(CreatePacket(responseOpcode, payload), Opcode.S2C_RegisterOTPResult);
 
             }
             catch
             {
-                return new RegisterOTPResult { Success = false};
+                return new OtpResult { Success = false};
             }
         }
 
         //4.6. Gửi mã otp đẻ xác thực đăng kí
-        public async Task<RegisterOTPVerificationResult> RequestRegisterOTPVerificationAsync(string email, string otpCode, OTP.OtpPurpose purpose)
+        public async Task<OtpResult> RequestRegisterOTPVerificationAsync(string email, string otpCode, OTP.OtpPurpose purpose)
         {
             try
             {
@@ -305,19 +316,46 @@ namespace PentagonLauncher.Launcher.Networking
                 if (responseOpcode == Opcode.S2C_ErrorResponse)
                 {
                     var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
-                    return new RegisterOTPVerificationResult { Success = errSuccess, Message = errMsg };
+                    return new OtpResult { Success = errSuccess, Message = errMsg };
                 }
 
-                bool success = reader.ReadBoolean();
-                string message = reader.ReadString(MaxStringBytes);
-                reader.EnsureFullyRead();
-
-                return new RegisterOTPVerificationResult { Success = success, Message = message};
+                return OtpPacketSerializer.ReadResult(CreatePacket(responseOpcode, payload), Opcode.S2C_RegisterOTPVerificationResult);
 
             }
             catch
             {
-                return new RegisterOTPVerificationResult { Success = false, Message = "Đã xảy ra lỗi." };
+                return new OtpResult { Success = false, Message = "Đã xảy ra lỗi." };
+            }
+        }
+
+
+        public async Task<OtpResult> RequestResetPassOTPVerifyAsync(string email, string otpCode, OTP.OtpPurpose purpose)
+        {
+            try
+            {
+                var writer = new PacketWriter();
+                writer.WriteString(email ?? string.Empty);
+                writer.WriteString(otpCode);
+                writer.WriteByte((byte)purpose);
+
+                byte[] requestBytes = writer.Build(Opcode.C2S_ResetPassOTPVerificationRequest);
+
+                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
+
+                var reader = new PacketReader(payload);
+
+                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                {
+                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    return new OtpResult { Success = errSuccess, Message = errMsg };
+                }
+
+                return OtpPacketSerializer.ReadResult(CreatePacket(responseOpcode, payload), Opcode.C2S_ResetPassOTPVerificationResult);
+
+            }
+            catch
+            {
+                return new OtpResult { Success = false, Message = "Đã xảy ra lỗi." };
             }
         }
 

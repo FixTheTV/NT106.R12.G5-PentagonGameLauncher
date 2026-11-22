@@ -13,7 +13,6 @@ public partial class ResetPasswordForm : Form
     private readonly LauncherTcpClient client = LauncherTcpClient.Shared;
 
     private readonly string _email;
-    private string _resetToken = "";
 
     public ResetPasswordForm(string email)
     {
@@ -22,7 +21,6 @@ public partial class ResetPasswordForm : Form
         _email = email;
     }
 
-    public ResetPasswordForm(string email,string resetToken) : this(email) => _resetToken = resetToken;
 
     private async void btnReset_Click(object? sender, EventArgs e)
     {
@@ -32,7 +30,7 @@ public partial class ResetPasswordForm : Form
         btnReset.Enabled = false;
         try
         {
-            var result = await client.ResetPasswordAsync(_email,_resetToken, password);
+            var result = await client.ResetPasswordAsync(_email, password);
             using var dialog = new ResultForm(result.Success, result.Message);
             dialog.ShowDialog(this);
             if (result.Success)

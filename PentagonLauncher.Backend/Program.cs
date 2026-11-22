@@ -21,8 +21,9 @@ namespace PentagonLauncher.Backend
 
             // Khởi tạo các Service bên Long
             var databaseService = new DatabaseService(EnvironmentSettings.GetDatabaseConnectionString());
-            var authService = new AuthService(databaseService);
             var otpService = new OTPService(databaseService);
+            var authService = new AuthService(databaseService, otpService);
+
 
             // Khởi tạo quản lý phiên và bộ xử lý gói tin bên Khôi
             var sessionManager = new SessionManager();

@@ -14,6 +14,12 @@ namespace PentagonLauncher.Backend.Networking
 
     public class ClientPeer
     {
+        public Dictionary<byte, (string Email, DateTime Expires, string Code)> OtpPermissions { get; } = new();
+
+        public bool HasOtpPermission(byte purpose, string email) =>
+            OtpPermissions.TryGetValue(purpose, out var permission) &&
+            permission.Expires > DateTime.UtcNow &&
+            string.Equals(permission.Email, email.Trim(), StringComparison.OrdinalIgnoreCase);
         public Guid ConnectionId { get; } = Guid.NewGuid();
         public TcpClient TcpClient { get; }
         public NetworkStream Stream => TcpClient.GetStream();

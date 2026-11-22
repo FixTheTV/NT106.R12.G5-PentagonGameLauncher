@@ -22,6 +22,32 @@ namespace PentagonLauncher.Backend.Services
             return new MySqlConnection(_connectionString); 
         }
 
+        // Consume the verified OTP and mutate the account in the same transaction.
+        public async Task<bool> CompleteOtpAsync(int otpId, string email, string hash, string? username = null)
+        {
+            using var conn = GetConnection();
+            await conn.OpenAsync();
+            using var tx = await conn.BeginTransactionAsync();
+            using var consume = new MySqlCommand("UPDATE otp_requests SET is_used=TRUE WHERE id=@id AND email=@email AND purpose=@purpose AND is_verified=TRUE AND is_used=FALSE AND expired_at>CURRENT_TIMESTAMP", conn, tx);
+            consume.Parameters.AddWithValue("@id", otpId);
+            consume.Parameters.AddWithValue("@email", email);
+            consume.Parameters.AddWithValue("@purpose", username is null ? 2 : 1);
+            if (await consume.ExecuteNonQueryAsync() != 1) return false;
+            using var account = new MySqlCommand(username is null
+                ? "UPDATE users SET password_hash=@hash WHERE email=@email"
+                : "INSERT INTO users(username,email,password_hash) VALUES(@username,@email,@hash)", conn, tx);
+            account.Parameters.AddWithValue("@email", email);
+            account.Parameters.AddWithValue("@hash", hash);
+            if (username is not null) account.Parameters.AddWithValue("@username", username);
+            try
+            {
+                if (await account.ExecuteNonQueryAsync() != 1) return false;
+                await tx.CommitAsync();
+                return true;
+            }
+            catch (MySqlException ex) when (ex.Number == 1062) { return false; }
+        }
+
         // 1. Kiểm tra username đã tồn tại chưa(True/false)
         public async Task<bool> IsUsernameExistsAsync(string username)  // Task<bool>: là 1 kiểu dữ liệu ( task đại diện cho công việc đang được xử lý ở chế độ nền,
         {
@@ -92,14 +118,21 @@ namespace PentagonLauncher.Backend.Services
         {
             using var conn = GetConnection();
             await conn.OpenAsync();
+            using var tx = await conn.BeginTransactionAsync();
+            using var invalidate = new MySqlCommand("UPDATE otp_requests SET is_used=TRUE WHERE email=@email AND purpose=@purpose AND is_used=FALSE", conn, tx);
+            invalidate.Parameters.AddWithValue("@email", email.Trim().ToLowerInvariant());
+            invalidate.Parameters.AddWithValue("@purpose", (byte)otp.Purpose);
+            await invalidate.ExecuteNonQueryAsync();
             using var cmd = new MySqlCommand(
-                "INSERT INTO otp_requests (email, purpose, otp_code) VALUES (@email, @purpose, @code)", conn);
+                "INSERT INTO otp_requests (email, purpose, otp_code) VALUES (@email, @purpose, @code)", conn, tx);
 
             cmd.Parameters.AddWithValue("@email", email.Trim().ToLowerInvariant());  //cắt chuỗi thừa cuẩ email để giống trong 2 hàm tìm kiếm Otp là GetValidOtpIdAsync và GetVerifiedRegistrationOtpIdAsync
             cmd.Parameters.AddWithValue("@code", otp.Code);
             cmd.Parameters.AddWithValue("@purpose", (int)otp.Purpose );
 
-            return await cmd.ExecuteNonQueryAsync() > 0;
+            bool saved = await cmd.ExecuteNonQueryAsync() > 0;
+            await tx.CommitAsync();
+            return saved;
         }
         // 6. Lưu mã OTP mới vào bảng password_resets
         public async Task<bool> SavePassResetAsync(int userId)
@@ -206,7 +239,7 @@ namespace PentagonLauncher.Backend.Services
         UPDATE otp_requests
         SET is_verified = TRUE
         WHERE id = @otpId
-          AND is_used = FALSE;
+          AND is_used = FALSE AND expired_at > CURRENT_TIMESTAMP;
         """;
 
             using var cmd = new MySqlCommand(sql, conn);
@@ -222,6 +255,9 @@ namespace PentagonLauncher.Backend.Services
 
         // 3. Trước khi tạo tài khoản: kiểm tra email này đã verify OTP đăng ký chưa.
         public async Task<int?> GetVerifiedRegistrationOtpIdAsync(string email)
+            => await GetVerifiedOtpIdAsync(email, OTP.OtpPurpose.Registration);
+
+        public async Task<int?> GetVerifiedOtpIdAsync(string email, OTP.OtpPurpose purpose)
         {
             using var conn = GetConnection();
             await conn.OpenAsync();
@@ -242,7 +278,7 @@ namespace PentagonLauncher.Backend.Services
             cmd.Parameters.AddWithValue("@email", email.Trim().ToLowerInvariant());
             cmd.Parameters.AddWithValue(
                 "@purpose",
-                (byte)OTP.OtpPurpose.Registration);
+                (byte)purpose);
 
             object? result = await cmd.ExecuteScalarAsync();
 
@@ -263,7 +299,7 @@ namespace PentagonLauncher.Backend.Services
             using var conn = GetConnection();
 
             conn.Open();
-
+            
             string createUsersTable = @"
                 CREATE TABLE IF NOT EXISTS users (
                 id INT AUTO_INCREMENT PRIMARY KEY,

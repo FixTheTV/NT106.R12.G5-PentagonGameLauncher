@@ -25,6 +25,10 @@ namespace PentagonLauncher.Shared.Protocol
 
         C2S_RegisterOTPVerificationRequest = 1006,
         S2C_RegisterOTPVerificationResult = 2006,
+
+
+        C2S_ResetPassOTPVerificationRequest = 1007,
+        C2S_ResetPassOTPVerificationResult = 2007,
         // Lobby
         C2S_JoinLobbyRequest = 1101,
         S2C_JoinLobbyResponse = 2101,

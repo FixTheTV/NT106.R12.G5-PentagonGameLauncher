@@ -1,4 +1,4 @@
-﻿using BCrypt.Net;  //thư viện để băm mật khẩu 1 chiều(HashPassword khi tạo, Verify khi đối chiếu)
+using BCrypt.Net;  //thư viện để băm mật khẩu 1 chiều(HashPassword khi tạo, Verify khi đối chiếu)
 using PentagonLauncher.Shared.Interfaces;
 using PentagonLauncher.Shared.Models.Authentication;//de lấy được file LoginResult.cs va file Longin Result.cs bên .Shared.Models.authentcation , để bổ sung 2 hàm overload (hàm cùng tên nhưng nhận model ) 
 using System;
@@ -10,13 +10,17 @@ namespace PentagonLauncher.Backend.Services;
 
 public class AuthService: IBackendAuthService
 {
+    public async Task<bool> IsVerifiedCodeAsync(string email, byte purpose, string code) =>
+        await _db.GetValidOtpIdAsync(email, (OTP.OtpPurpose)purpose, code) is not null;
     private readonly DatabaseService _db;
+    private readonly OTPService _otpService;
     // Biểu thức chính quy: Username chỉ gồm chữ cái, số, gạch dưới, từ 3 - 20 ký tự
     private static readonly Regex UsernameRegex = new Regex("^[a-zA-Z0-9_]{3,20}$", RegexOptions.Compiled);
 
-    public AuthService(DatabaseService db)
+    public AuthService(DatabaseService db, OTPService otpService)
     {
         _db = db;
+        _otpService = otpService;
     }
 
 
@@ -62,14 +66,13 @@ public class AuthService: IBackendAuthService
 
         // Băm mật khẩu bằng BCrypt
         string hash = BCrypt.Net.BCrypt.HashPassword(password);
-        bool created = await _db.CreateUserAsync(username, email, hash);
+        bool created = await _db.CompleteOtpAsync(verifiedOtpId.Value, email, hash, username);
 
         if (!created)
         {
             return (false, "Lỗi khi lưu dữ liệu người dùng.");
         }
 
-        await _db.MarkOtpUsedAsync(verifiedOtpId.Value);
 
         return (true, "Đăng ký tài khoản thành công.");
     }
@@ -135,25 +138,21 @@ public class AuthService: IBackendAuthService
     {
         email = email.Trim().ToLower();
 
-        // Task: Xử lý trường hợp tài khoản không tồn tại
         int? userId = await _db.GetUserIdByEmailAsync(email);
+
         if (userId == null)
+        {
             return (false, "Email này không tồn tại trong hệ thống.");
+        }
+        else
+        {
+            var result = await _otpService.CreatePasswordResetOTP(email, OTP.OtpPurpose.PasswordReset);
 
-        // Sinh mã OTP 6 số ngẫu nhiên
-        string otpCode = Random.Shared.Next(100000, 1000000).ToString();
-        // Task: Xây dựng kiểm tra thời hạn mã xác nhận (hạn 5 phút)
-        DateTime expiresAt = DateTime.UtcNow.AddMinutes(5);
+        }
+            
 
-        //await _db.SaveOtpAsync(userId.Value, otpCode, expiresAt);
 
-        // In mã OTP ra màn hình Console để chạy demo đồ án môn học
-        Console.WriteLine("====================================================");
-        Console.WriteLine($"[DEMO OTP] Ma xac nhan cho {email} la: {otpCode}");
-        Console.WriteLine($"[DEMO OTP] Hieu luc den: {expiresAt.ToLocalTime()}");
-        Console.WriteLine("====================================================");
-
-        return (true, "Mã xác nhận 6 chữ số đã được gửi (kiểm tra console server).");
+        return (true, "Yêu cầu thành công");
     }
     // Hàm overload RequestPasswordResetAsync: Nhận Model ForgotPasswordRequest
     public async Task<ForgotPasswordResult> RequestPasswordResetAsync(ForgotPasswordRequest request)
@@ -167,37 +166,25 @@ public class AuthService: IBackendAuthService
     }
 
     // Task: Xây dựng kiểm tra mã xác nhận, hạn mã & đặt lại mật khẩu
-    public async Task<(bool Success, string Message)> ResetPasswordAsync(string email, string otpCode, string newPassword)
+    public async Task<(bool Success, string Message)> ResetPasswordAsync(string email, string newPassword)
     {
         email = email.Trim().ToLower();
-        otpCode = otpCode.Trim();
+        if (string.IsNullOrEmpty(newPassword) || newPassword.Length < 6)
+            return (false, "Mật khẩu cần ít nhất 6 ký tự.");
 
-        // 1. Kiểm tra tài khoản tồn tại
+        int? otpId = await _db.GetVerifiedOtpIdAsync(email, OTP.OtpPurpose.PasswordReset);
+        if (otpId is null)
+            return (false, "Vui lòng xác minh OTP đặt lại mật khẩu còn hiệu lực.");
+
         int? userId = await _db.GetUserIdByEmailAsync(email);
         if (userId == null)
             return (false, "Tài khoản không tồn tại.");
 
-        // 2. Task: Xây dựng kiểm tra mật khẩu mới
-        if (string.IsNullOrEmpty(newPassword) || newPassword.Length < 6)
-            return (false, "Mật khẩu mới tối thiểu phải từ 6 ký tự.");
 
-        // 3. Lấy OTP từ CSDL
-        var otpRecord = await _db.GetLatestOtpAsync(userId.Value);
-        if (otpRecord == null)
-            return (false, "Không tìm thấy yêu cầu đặt lại mật khẩu nào.");
-
-        // 4. Task: Xử lý trường hợp mã xác nhận không hợp lệ
-        if (otpRecord.Value.OtpCode != otpCode)
-            return (false, "Mã xác nhận không hợp lệ.");
-
-        // 5. Task: Xử lý trường hợp mã xác nhận hết hạn
-        if (DateTime.UtcNow > otpRecord.Value.ExpiresAt)
-            return (false, "Mã xác nhận đã hết hạn (quá 5 phút). Vui lòng xin mã mới.");
-
-        // 6. Cập nhật mật khẩu mới và đánh dấu OTP đã dùng
         string newHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
-        await _db.UpdatePasswordAsync(userId.Value, newHash);
-        //await _db.MarkOtpUsedAsync(otpRecord.Value.ResetId);
+        if (!await _db.CompleteOtpAsync(otpId.Value, email, newHash))
+            return (false, "Không cập nhật được mật khẩu.");
+
 
         return (true, "Đặt lại mật khẩu thành công! Bạn có thể đăng nhập ngay.");
     }
@@ -205,7 +192,7 @@ public class AuthService: IBackendAuthService
     // Hàm overload ResetPasswordAsync: Nhận Model ResetPasswordRequest
     public async Task<ResetPasswordResult> ResetPasswordAsync(ResetPasswordRequest request)
     {
-        var res = await ResetPasswordAsync(request.Email, request.OtpCode, request.NewPassword);
+        var res = await ResetPasswordAsync(request.Email, request.NewPassword);
         return new ResetPasswordResult
         {
             Success = res.Success,
@@ -214,8 +201,9 @@ public class AuthService: IBackendAuthService
     }
 
 
-    public async Task<RegisterOTPResult> VerifyRegisterOTP(string email, string otpCode, OTP.OtpPurpose purpose)
+    public async Task<OtpResult> VerifyRegisterOTP(string email, string otpCode, OTP.OtpPurpose purpose)
     {
+        if (purpose != OTP.OtpPurpose.Registration) return new OtpResult { Success = false };
         var otpID = await _db.GetValidOtpIdAsync(email,purpose,otpCode);
 
         if (otpID != null)
@@ -223,18 +211,40 @@ public class AuthService: IBackendAuthService
             var markVerified = await _db.MarkOtpVerifiedAsync(otpID);
             if (markVerified)
             {
-                return new RegisterOTPResult { Success = true };
+                return new OtpResult { Success = true };
             }
         }
         else
         {
-            return new RegisterOTPResult { Success = false };
+            return new OtpResult { Success = false };
         }
 
-        return new RegisterOTPResult { Success = false };
+        return new OtpResult { Success = false };
 
     }
 
+
+    public async Task<OtpResult> VerifyResetPassOTP(string email, string otpCode, OTP.OtpPurpose purpose)
+    {
+        if (purpose != OTP.OtpPurpose.PasswordReset) return new OtpResult { Success = false };
+        var otpID = await _db.GetValidOtpIdAsync(email, purpose, otpCode);
+
+        if (otpID != null)
+        {
+            var markVerified = await _db.MarkOtpVerifiedAsync(otpID);
+            if (markVerified)
+            {
+                return new OtpResult { Success = true };
+            }
+        }
+        else
+        {
+            return new OtpResult { Success = false };
+        }
+
+        return new OtpResult { Success = false };
+
+    }
 
 
 

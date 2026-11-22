@@ -60,8 +60,10 @@ namespace PentagonLauncher.Launcher.Forms {
                 // Username dùng giá trị Backend trả về, không dùng trực tiếp ô input.
                 using var launcher = new LauncherForm(result.Username);
                 Hide();
-                launcher.ShowDialog(this);
+                try { launcher.ShowDialog(this); }
+                finally { await client.LogoutAsync(); }
                 Show();
+                txtPassword.Clear();
                 txtUsername.Focus();
                 lblStatus.Text = "Bạn đã đăng xuất.";
             }

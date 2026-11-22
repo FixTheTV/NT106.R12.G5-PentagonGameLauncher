@@ -37,10 +37,13 @@ namespace PentagonLauncher.Backend.Networking
         {
             if (peer.UserId.HasValue)
             {
-                ActiveClients.TryRemove(peer.UserId.Value, out _);
+                // Remove only this connection; cleanup of an old peer must not remove its replacement.
+                ((ICollection<KeyValuePair<int, ClientPeer>>)ActiveClients)
+                    .Remove(new KeyValuePair<int, ClientPeer>(peer.UserId.Value, peer));
             }
 
             peer.UserId = null;
+            peer.OtpPermissions.Clear();
             peer.Username = null;
             peer.State = ClientState.Connected;
         }

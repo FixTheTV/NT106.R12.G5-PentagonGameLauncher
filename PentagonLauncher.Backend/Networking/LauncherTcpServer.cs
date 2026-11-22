@@ -128,7 +128,13 @@ namespace PentagonLauncher.Backend.Networking
                 case Opcode.C2S_RegisterRequest: // 1002
                 {
                     RegisterRequest request = AuthPacketSerializer.ReadRegisterRequest(packet);
+                    if (!peer.HasOtpPermission(1, request.Email) || !await _authService.IsVerifiedCodeAsync(request.Email, 1, peer.OtpPermissions[1].Code))
+                    {
+                        await peer.SendPacketAsync(AuthPacketSerializer.CreateRegisterResultPacker(new RegisterResult { Success = false, Message = "Hãy xác minh OTP đăng ký trên kết nối này." }));
+                        break;
+                    }
                     var result = await _authService.RegisterAsync(request);
+                    if (result.Success) peer.OtpPermissions.Remove(1);
 
                     // Gửi gói 2002 (S2C_RegisterResult)
                     byte[] responsePacket = AuthPacketSerializer.CreateRegisterResultPacker(result);
@@ -150,7 +156,13 @@ namespace PentagonLauncher.Backend.Networking
                 case Opcode.C2S_ResetPasswordRequest: // 1004
                 {
                     ResetPasswordRequest request = AuthPacketSerializer.ReadResetPasswordRequest(packet);
+                    if (!peer.HasOtpPermission(2, request.Email) || !await _authService.IsVerifiedCodeAsync(request.Email, 2, peer.OtpPermissions[2].Code))
+                    {
+                        await peer.SendPacketAsync(AuthPacketSerializer.CreateResetPasswordResultPacket(new ResetPasswordResult { Success = false, Message = "Hãy xác minh OTP reset trên kết nối này." }));
+                        break;
+                    }
                     var result = await _authService.ResetPasswordAsync(request);
+                    if (result.Success) peer.OtpPermissions.Remove(2);
 
                     // Gửi gói 2004 (S2C_ResetPasswordResult)
                     byte[] responsePacket = AuthPacketSerializer.CreateResetPasswordResultPacket(result);
@@ -170,6 +182,7 @@ namespace PentagonLauncher.Backend.Networking
 
                         var writer = new PacketWriter();
                         writer.WriteBoolean(true);
+                        writer.WriteString("Đã tạo OTP. Kiểm tra console backend (demo).");
                         
                         byte[] responsepacket = writer.Build(Opcode.S2C_RegisterOTPResult);
                         await peer.SendPacketAsync(responsepacket);
@@ -187,6 +200,7 @@ namespace PentagonLauncher.Backend.Networking
                         var writer = new PacketWriter();
 
                         var res = await _authService.VerifyRegisterOTP(email, otpCode, purpose);
+                        if (res.Success) peer.OtpPermissions[1] = (email.Trim(), DateTime.UtcNow.AddMinutes(5), otpCode);
                         if ( res.Success)
                         {
                             writer.WriteBoolean(true);
@@ -200,6 +214,35 @@ namespace PentagonLauncher.Backend.Networking
                         
 
                         byte[] responsepacket = writer.Build(Opcode.S2C_RegisterOTPVerificationResult);
+                        await peer.SendPacketAsync(responsepacket);
+                        break;
+                    }
+                case Opcode.C2S_ResetPassOTPVerificationRequest: //1007
+                    {
+                        PacketReader reader = new(packet.Payload);
+                        string email = reader.ReadString(PacketConstants.MaximunEmailByteLength);
+                        string otpCode = reader.ReadString(PacketConstants.MaximumOtpcodeByteLength);
+                        OTP.OtpPurpose purpose = (OTP.OtpPurpose)reader.ReadByte();
+                        reader.EnsureFullyRead();
+
+
+                        var writer = new PacketWriter();
+
+                        var res = await _authService.VerifyResetPassOTP(email, otpCode, purpose);
+                        if (res.Success) peer.OtpPermissions[2] = (email.Trim(), DateTime.UtcNow.AddMinutes(5), otpCode);
+                        if (res.Success)
+                        {
+                            writer.WriteBoolean(true);
+                            writer.WriteString("Đã xác thực OTP thành công");
+                        }
+                        else
+                        {
+                            writer.WriteBoolean(false);
+                            writer.WriteString("Đã xác thực OTP thất bại");
+                        }
+
+
+                        byte[] responsepacket = writer.Build(Opcode.C2S_ResetPassOTPVerificationResult);
                         await peer.SendPacketAsync(responsepacket);
                         break;
                     }

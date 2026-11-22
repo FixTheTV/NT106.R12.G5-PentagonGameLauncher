@@ -19,6 +19,7 @@ public partial class OtpForm : Form
     private readonly System.Windows.Forms.Timer _clock = new() { Interval = 1000 };
     private TextBox[] _otpBoxes = Array.Empty<TextBox>();
     private bool _updatingBoxes;
+    private bool _busy;
 
     // Constructor không tham số để Visual Studio Designer mở form bình thường.
     public OtpForm()
@@ -58,10 +59,10 @@ public partial class OtpForm : Form
         TimeSpan remain = _expiresAt - DateTime.UtcNow;
         if (remain < TimeSpan.Zero) remain = TimeSpan.Zero;
         lblCountdown.Text = $"⏱ Còn lại: {remain.Minutes:00}:{remain.Seconds:00}";
-        btnVerify.Enabled = remain > TimeSpan.Zero;
+        btnVerify.Enabled = !_busy && remain > TimeSpan.Zero;
 
         int resendSeconds = Math.Max(0, (int)Math.Ceiling((_resendAvailableAt - DateTime.UtcNow).TotalSeconds));
-        btnResend.Enabled = resendSeconds == 0;
+        btnResend.Enabled = !_busy && resendSeconds == 0;
         btnResend.Text = resendSeconds > 0 ? $"Gửi lại mã (sau {resendSeconds}s)" : "Gửi lại mã";
         if (remain == TimeSpan.Zero)
             lblStatus.Text = "Mã đã hết hạn. Hãy bấm Gửi lại mã.";
@@ -110,19 +111,22 @@ public partial class OtpForm : Form
 
     private async void btnVerify_Click(object? sender, EventArgs e)
     {
+        if (_busy) return;
         string code = string.Concat(_otpBoxes.Select(x => x.Text));
         if (code.Length != 6 || !code.All(char.IsDigit))
         {
             lblStatus.Text = "Vui lòng nhập đủ 6 chữ số.";
             return;
         }
+        _busy = true;
         btnVerify.Enabled = false;
         try
         {
-            RegisterOTPResult verify = await client.RequestRegisterOTPAsync(_email, OTP.OtpPurpose.Registration);
-            if (!verify.Success) { lblStatus.Text = "Yeu cau ma OTP that bai"; return; }
+            OtpResult verify = await client.RequestResetPassOTPVerifyAsync(_email, code ,OTP.OtpPurpose.PasswordReset);
+
+            if (!verify.Success) { lblStatus.Text = verify.Message; return; }
             _clock.Stop();
-            using var reset = new ResetPasswordForm(_email,verify.OTPCode);
+            using var reset = new ResetPasswordForm(_email);
             Hide();
             if (reset.ShowDialog(this) == DialogResult.OK)
             {
@@ -136,11 +140,13 @@ public partial class OtpForm : Form
             Close();
         }
         catch (Exception ex) { lblStatus.Text = $"Xác thực thất bại: {ex.Message}"; }
-        finally { if (!IsDisposed) Clock_Tick(this, EventArgs.Empty); }
+        finally { _busy = false; if (!IsDisposed) Clock_Tick(this, EventArgs.Empty); }
     }
 
     private async void btnResend_Click(object? sender, EventArgs e)
     {
+        if (_busy) return;
+        _busy = true;
         btnResend.Enabled = false;
         try
         {
@@ -148,9 +154,10 @@ public partial class OtpForm : Form
             if (!result.Success) { lblStatus.Text = result.Message; return; }
             foreach (var box in _otpBoxes) box.Clear();
             _otpBoxes[0].Focus();
-            lblStatus.Text = "Mã demo: 123456 (chỉ để thử giao diện).";
+            lblStatus.Text = "Đã gửi lại mã. Kiểm tra console backend trong bản demo.";
             RestartCountdown();
         }
         catch (Exception ex) { lblStatus.Text = $"Không gửi lại được mã: {ex.Message}"; }
+        finally { _busy = false; if (!IsDisposed) Clock_Tick(this, EventArgs.Empty); }
     }
 }

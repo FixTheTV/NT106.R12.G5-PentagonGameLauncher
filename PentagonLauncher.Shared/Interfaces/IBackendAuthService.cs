@@ -31,7 +31,6 @@ public interface IBackendAuthService
 
     Task<(bool Success, string Message)> ResetPasswordAsync(
         string email,
-        string otpCode,
         string newPassword);
 
     Task<ResetPasswordResult> ResetPasswordAsync(

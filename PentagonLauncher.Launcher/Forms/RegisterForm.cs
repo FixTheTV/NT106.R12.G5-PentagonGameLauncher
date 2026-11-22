@@ -104,7 +104,7 @@ public partial class RegisterForm : Form
             await client.ConnectAsync();
             if (IsDisposed) return;
 
-            RegisterOTPResult result = await client.RequestRegisterOTPAsync(
+            OtpResult result = await client.RequestRegisterOTPAsync(
                 email, OTP.OtpPurpose.Registration);
             if (IsDisposed) return;
 
@@ -116,7 +116,7 @@ public partial class RegisterForm : Form
 
             _requestedEmail = email;
             foreach (TextBox digit in _digits) digit.Clear();
-            lblOtpStatus.Text = "Server đã gửi mã OTP. Vui lòng kiểm tra email.";
+            lblOtpStatus.Text = "Đã tạo OTP. Kiểm tra console backend (demo), mã có hạn 5 phút.";
             _digits[0].Focus();
         }
         catch (Exception ex)
@@ -196,7 +196,7 @@ public partial class RegisterForm : Form
         UpdateControls();
         try
         {
-            RegisterOTPVerificationResult result =
+            OtpResult result =
                 await client.RequestRegisterOTPVerificationAsync(
                     _requestedEmail, otp, OTP.OtpPurpose.Registration);
             if (IsDisposed) return;
@@ -241,6 +241,7 @@ public partial class RegisterForm : Form
             if (IsDisposed) return;
             if (!result.Success)
             {
+                ResetVerification();
                 ShowError(result.Message);
                 return;
             }

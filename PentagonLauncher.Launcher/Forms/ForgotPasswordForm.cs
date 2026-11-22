@@ -30,6 +30,10 @@ public partial class ForgotPasswordForm : Form
         btnSend.Enabled = false;
         try
         {
+
+            await client.ConnectAsync();
+            if (IsDisposed) return;
+
             var result = await client.RequestPasswordResetAsync(email);
             if (!result.Success) { lblStatus.Text = result.Message; return; }
             using var otp = new OtpForm(email);
