@@ -242,7 +242,7 @@ namespace PentagonLauncher.Backend.Networking
                         }
 
 
-                        byte[] responsepacket = writer.Build(Opcode.C2S_ResetPassOTPVerificationResult);
+                        byte[] responsepacket = writer.Build(Opcode.S2C_ResetPassOTPVerificationResult);
                         await peer.SendPacketAsync(responsepacket);
                         break;
                     }

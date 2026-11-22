@@ -14,7 +14,7 @@ namespace PentagonLauncher.Shared.Protocol
         public const int MaximumOtpcodeByteLength = 24;
         public const int MaximumMessageByteLength = 2_048;
         public const int MinimumUsernameLength = 3;
-        public const int MaximuUsernameLength = 20;
+        public const int MaximumUsernameLength = 20;
         public const int OtpcodeLength = 6;
         public const int MaximumChatByteLength = 500;
     }

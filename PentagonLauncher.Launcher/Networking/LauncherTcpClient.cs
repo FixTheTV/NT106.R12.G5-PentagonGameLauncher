@@ -350,7 +350,7 @@ namespace PentagonLauncher.Launcher.Networking
                     return new OtpResult { Success = errSuccess, Message = errMsg };
                 }
 
-                return OtpPacketSerializer.ReadResult(CreatePacket(responseOpcode, payload), Opcode.C2S_ResetPassOTPVerificationResult);
+                return OtpPacketSerializer.ReadResult(CreatePacket(responseOpcode, payload), Opcode.S2C_ResetPassOTPVerificationResult);
 
             }
             catch

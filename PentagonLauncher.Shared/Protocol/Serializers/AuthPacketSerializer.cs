@@ -277,11 +277,33 @@ namespace PentagonLauncher.Shared.Protocol.Serializers
         {
             if (string.IsNullOrWhiteSpace(username))
             {
-                throw new ProtocolException("Username không được để trống.");
+                throw new ProtocolException(
+                    "Username không được để trống.");
             }
-            if (username.Length < PacketConstants.MinimumUsernameLength || username.Length > PacketConstants.MaximumUsernameByteLength)
+
+            if (username.Length < PacketConstants.MinimumUsernameLength ||
+                username.Length > PacketConstants.MaximumUsernameLength)
             {
-                throw new ProtocolException($"username phai co tu {PacketConstants.MinimumUsernameLength} den {PacketConstants.MaximumUsernameByteLength} ki tu");
+                throw new ProtocolException(
+                    $"Username phải có từ " +
+                    $"{PacketConstants.MinimumUsernameLength} đến " +
+                    $"{PacketConstants.MaximumUsernameLength} ký tự.");
+            }
+
+            foreach (char character in username)
+            {
+                bool isAsciiLetter =
+                    character is >= 'a' and <= 'z' ||
+                    character is >= 'A' and <= 'Z';
+
+                bool isDigit =
+                    character is >= '0' and <= '9';
+
+                if (!isAsciiLetter && !isDigit && character != '_')
+                {
+                    throw new ProtocolException(
+                        "Username chỉ được chứa chữ cái tiếng Anh, chữ số và dấu gạch dưới.");
+                }
             }
         }
         private static void ValidateEmail(string email)
