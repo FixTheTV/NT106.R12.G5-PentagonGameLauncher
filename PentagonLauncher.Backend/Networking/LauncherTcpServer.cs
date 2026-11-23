@@ -79,6 +79,12 @@ namespace PentagonLauncher.Backend.Networking
             catch (Exception ex)
             {
                 Console.WriteLine($"[Server Error] Lỗi xử lý tại Client {peer.ConnectionId}: {ex.Message}");
+                try
+                {
+                    await peer.SendPacketAsync(ErrorPacketSerializer.CreateErrorResponsePacket(false,
+                        "Máy chủ gặp lỗi xử lý. Nếu vừa thay đổi tài khoản, hãy kiểm tra kết quả trước khi thử lại."));
+                }
+                catch (Exception sendError) { Console.WriteLine($"[Error response] {sendError.GetType().Name}"); }
             }
             finally
             {

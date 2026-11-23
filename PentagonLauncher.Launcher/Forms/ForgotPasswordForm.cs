@@ -31,10 +31,15 @@ public partial class ForgotPasswordForm : Form
         try
         {
 
-            await client.ConnectAsync();
+            if (!await client.ConnectAsync())
+            {
+                if (!IsDisposed) lblStatus.Text = "Không kết nối được máy chủ. Kiểm tra mạng và cấu hình server.";
+                return;
+            }
             if (IsDisposed) return;
 
             var result = await client.RequestPasswordResetAsync(email);
+            if (IsDisposed || Disposing) return;
             if (!result.Success) { lblStatus.Text = result.Message; return; }
             using var otp = new OtpForm(email);
             Hide();
@@ -46,8 +51,8 @@ public partial class ForgotPasswordForm : Form
             }
             Show();
         }
-        catch (Exception ex) { lblStatus.Text = $"Không gửi được mã: {ex.Message}"; }
-        finally { btnSend.Enabled = true; }
+        catch (Exception ex) { if (!IsDisposed) { Show(); lblStatus.Text = $"Không gửi được mã: {ex.Message}"; } }
+        finally { if (!IsDisposed) btnSend.Enabled = true; }
     }
 
     private void btnBack_Click(object? sender, EventArgs e) => Close();

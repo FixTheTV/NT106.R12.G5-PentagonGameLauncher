@@ -32,9 +32,10 @@ namespace PentagonLauncher.Launcher.Forms {
             try
             {
                 var result = await client.ConnectAsync();
+                if (IsDisposed || Disposing) return;
                 if (!result)
                 {
-                    lblStatus.Text = $"Server đang được bảo trì";
+                    lblStatus.Text = "Không kết nối được máy chủ. Kiểm tra mạng và cấu hình server.";
                     btnLogin.Enabled = true;
                     return;
                 }
@@ -49,6 +50,7 @@ namespace PentagonLauncher.Launcher.Forms {
             try
             {
                 var result = await client.LoginAsync(username, password);
+                if (IsDisposed || Disposing) { await client.LogoutAsync(); return; }
                 if (!result.Success)
                 {
                     lblStatus.Text = result.Message;
@@ -71,7 +73,7 @@ namespace PentagonLauncher.Launcher.Forms {
             {
                 lblStatus.Text = $"Không thể đăng nhập: {ex.Message}";
             }
-            finally { btnLogin.Enabled = true; }
+            finally { if (!IsDisposed) btnLogin.Enabled = true; }
         }
 
         private void btnRegister_Click(object? sender, EventArgs e)

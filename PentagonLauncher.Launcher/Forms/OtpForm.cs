@@ -124,6 +124,7 @@ public partial class OtpForm : Form
         {
             OtpResult verify = await client.RequestResetPassOTPVerifyAsync(_email, code ,OTP.OtpPurpose.PasswordReset);
 
+            if (IsDisposed || Disposing) return;
             if (!verify.Success) { lblStatus.Text = verify.Message; return; }
             _clock.Stop();
             using var reset = new ResetPasswordForm(_email);
@@ -151,6 +152,7 @@ public partial class OtpForm : Form
         try
         {
             var result = await client.RequestPasswordResetAsync(_email);
+            if (IsDisposed || Disposing) return;
             if (!result.Success) { lblStatus.Text = result.Message; return; }
             foreach (var box in _otpBoxes) box.Clear();
             _otpBoxes[0].Focus();

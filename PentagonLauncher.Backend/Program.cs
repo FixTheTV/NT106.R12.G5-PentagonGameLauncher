@@ -13,6 +13,16 @@ namespace PentagonLauncher.Backend
     {
         static async Task Main(string[] args)
         {
+            try { await RunAsync(); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Không thể khởi động/tiếp tục backend ({ex.GetType().Name}). Kiểm tra MySQL, schema, cấu hình .env và cổng TCP.");
+                Environment.ExitCode = 1;
+            }
+        }
+
+        private static async Task RunAsync()
+        {
             EnvironmentFile.Load();
             int port = EnvironmentSettings.GetPort("SERVER_PORT", 12345);
             Console.OutputEncoding = System.Text.Encoding.UTF8;

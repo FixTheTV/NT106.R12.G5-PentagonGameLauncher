@@ -110,7 +110,7 @@ public partial class RegisterForm : Form
 
             if (!result.Success)
             {
-                lblOtpStatus.Text = "Đã xảy ra lỗi khi gửi OTP.";
+                lblOtpStatus.Text = result.Message;
                 return;
             }
 

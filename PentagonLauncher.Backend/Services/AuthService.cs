@@ -70,7 +70,7 @@ public class AuthService: IBackendAuthService
 
         if (!created)
         {
-            return (false, "Lỗi khi lưu dữ liệu người dùng.");
+            return (false, "Không tạo được tài khoản: tên/email có thể vừa được sử dụng hoặc OTP không còn hiệu lực. Vui lòng kiểm tra và xác minh lại.");
         }
 
 

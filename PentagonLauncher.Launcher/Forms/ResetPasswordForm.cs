@@ -31,6 +31,7 @@ public partial class ResetPasswordForm : Form
         try
         {
             var result = await client.ResetPasswordAsync(_email, password);
+            if (IsDisposed || Disposing) return;
             using var dialog = new ResultForm(result.Success, result.Message);
             dialog.ShowDialog(this);
             if (result.Success)
@@ -42,8 +43,7 @@ public partial class ResetPasswordForm : Form
         }
         catch (Exception ex)
         {
-            using var dialog = new ResultForm(false, $"Lỗi kết nối hoặc xác thực: {ex.Message}");
-            dialog.ShowDialog(this);
+            if (IsDisposed || Disposing) return;
             lblStatus.Text = ex.Message;
         }
         finally { if (!IsDisposed) btnReset.Enabled = true; }

@@ -24,6 +24,7 @@ namespace PentagonLauncher.Launcher.Networking
         private NetworkStream? _stream;
         private CancellationTokenSource? _cts;
         private Task? _receiveTask;
+        private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
         // Hàng đợi đồng bộ cho cơ chế Request - Response
         private TaskCompletionSource<(Opcode Opcode, byte[] Payload)>? _pendingRequest;
@@ -38,6 +39,13 @@ namespace PentagonLauncher.Launcher.Networking
 
         // 1. KẾT NỐI & NGẮT KẾT NỐI TCP
         public async Task<bool> ConnectAsync(string? host = null, int? port = null)
+        {
+            await _connectionLock.WaitAsync();
+            try { return await ConnectCoreAsync(host, port); }
+            finally { _connectionLock.Release(); }
+        }
+
+        private async Task<bool> ConnectCoreAsync(string? host, int? port)
         {
             if (IsConnected) return true;
             // The previous receive loop must finish before replacing its socket.
@@ -79,10 +87,15 @@ namespace PentagonLauncher.Launcher.Networking
 
         public async Task LogoutAsync()
         {
+            await _connectionLock.WaitAsync();
+            try
+            {
             Disconnect();
             if (_receiveTask is not null) await _receiveTask;
             _stream = null;
             _tcpClient = null;
+            }
+            finally { _connectionLock.Release(); }
         }
 
         // 2. VÒNG LẶP NHẬN DỮ LIỆU TỪ SERVER (Chạy ngầm)
@@ -142,6 +155,8 @@ namespace PentagonLauncher.Launcher.Networking
             await _requestLock.WaitAsync();
             try
             {
+                if (!IsConnected || _stream == null)
+                    throw new IOException("Kết nối đã đóng.");
                 _pendingRequest = new TaskCompletionSource<(Opcode, byte[])>(TaskCreationOptions.RunContinuationsAsynchronously);
 
                 // Gửi gói tin lên Server
@@ -151,9 +166,14 @@ namespace PentagonLauncher.Launcher.Networking
                 // Chờ Server phản hồi (tối đa 10 giây)
                 using var timeoutCts = new CancellationTokenSource(timeoutMs);
                 await using var reg = timeoutCts.Token.Register(() =>
-                    _pendingRequest.TrySetException(new TimeoutException("Máy chủ không phản hồi (Timeout).")));
+                    _pendingRequest?.TrySetException(new TimeoutException("Chưa nhận được phản hồi; chưa xác định thao tác đã hoàn tất hay chưa.")));
 
                 return await _pendingRequest.Task;
+            }
+            catch (TimeoutException)
+            {
+                Disconnect();
+                throw;
             }
             finally
             {
@@ -185,7 +205,7 @@ namespace PentagonLauncher.Launcher.Networking
             }
             catch (Exception ex)
             {
-                return new LoginResult { Success = false, Message = $"Lỗi kết nối: {ex.Message}"};
+                return new LoginResult { Success = false, Message = DescribeError(ex)};
             }
         }
 
@@ -211,7 +231,7 @@ namespace PentagonLauncher.Launcher.Networking
             }
             catch (Exception ex)
             {
-                return new RegisterResult { Success = false, Message = $"Lỗi kết nối: {ex.Message}" };
+                return new RegisterResult { Success = false, Message = DescribeError(ex) };
             }
         }
 
@@ -236,7 +256,7 @@ namespace PentagonLauncher.Launcher.Networking
             }
             catch (Exception ex)
             {
-                return new ForgotPasswordResult { Success = false, Message = $"Lỗi kết nối: {ex.Message}" };
+                return new ForgotPasswordResult { Success = false, Message = DescribeError(ex) };
             }
         }
 
@@ -263,7 +283,7 @@ namespace PentagonLauncher.Launcher.Networking
             }
             catch (Exception ex)
             {
-                return new ResetPasswordResult { Success = false, Message = $"Lỗi kết nối: {ex.Message}" };
+                return new ResetPasswordResult { Success = false, Message = DescribeError(ex) };
             }
         }
 
@@ -284,16 +304,16 @@ namespace PentagonLauncher.Launcher.Networking
 
                 if (responseOpcode == Opcode.S2C_ErrorResponse)
                 {
-                    var (errSuccess, _) = ReadErrorResponse(responseOpcode, payload);
-                    return new OtpResult { Success = errSuccess};
+                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    return new OtpResult { Success = errSuccess, Message = errMsg };
                 }
 
                 return OtpPacketSerializer.ReadResult(CreatePacket(responseOpcode, payload), Opcode.S2C_RegisterOTPResult);
 
             }
-            catch
+            catch (Exception ex)
             {
-                return new OtpResult { Success = false};
+                return new OtpResult { Success = false, Message = DescribeError(ex) };
             }
         }
 
@@ -322,9 +342,9 @@ namespace PentagonLauncher.Launcher.Networking
                 return OtpPacketSerializer.ReadResult(CreatePacket(responseOpcode, payload), Opcode.S2C_RegisterOTPVerificationResult);
 
             }
-            catch
+            catch (Exception ex)
             {
-                return new OtpResult { Success = false, Message = "Đã xảy ra lỗi." };
+                return new OtpResult { Success = false, Message = DescribeError(ex) };
             }
         }
 
@@ -353,9 +373,9 @@ namespace PentagonLauncher.Launcher.Networking
                 return OtpPacketSerializer.ReadResult(CreatePacket(responseOpcode, payload), Opcode.S2C_ResetPassOTPVerificationResult);
 
             }
-            catch
+            catch (Exception ex)
             {
-                return new OtpResult { Success = false, Message = "Đã xảy ra lỗi." };
+                return new OtpResult { Success = false, Message = DescribeError(ex) };
             }
         }
 
@@ -375,6 +395,20 @@ namespace PentagonLauncher.Launcher.Networking
 
         private static Packet CreatePacket(Opcode opcode, byte[] payload) =>
             new(new PacketHeader(payload.Length + PacketConstants.HeaderSize, opcode), payload);
+
+        private static string DescribeError(Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine(ex);
+            return ex switch
+            {
+                TimeoutException => ex.Message,
+                ProtocolException => $"Dữ liệu không hợp lệ hoặc phiên bản client/server không khớp: {ex.Message}",
+                ArgumentException => $"Dữ liệu nhập không hợp lệ: {ex.Message}",
+                IOException or SocketException => "Kết nối bị gián đoạn. Nếu vừa gửi yêu cầu thay đổi dữ liệu, hãy kiểm tra kết quả trước khi thử lại.",
+                InvalidOperationException => "Chưa có kết nối tới máy chủ. Vui lòng kết nối lại.",
+                _ => "Có lỗi xử lý phía ứng dụng. Vui lòng thử lại."
+            };
+        }
 
         private static (bool Success, string Message) ReadErrorResponse(Opcode opcode, byte[] payload) =>
             ErrorPacketSerializer.ReadErrorResponsePacket(CreatePacket(opcode, payload));
