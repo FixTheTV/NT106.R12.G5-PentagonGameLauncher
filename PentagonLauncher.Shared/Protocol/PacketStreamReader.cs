@@ -9,10 +9,20 @@ namespace PentagonLauncher.Shared.Protocol
         public static async Task<Packet> ReadPacketAsync(
             Stream stream, CancellationToken cancellationToken = default)
         {
+            return await ReadPacketOrNullAsync(stream, cancellationToken)
+                ?? throw new EndOfStreamException("Remote endpoint đã đóng kết nối.");
+        }
+
+        // EOF trước header là đóng kết nối bình thường; EOF giữa packet là packet bị cắt.
+        public static async Task<Packet?> ReadPacketOrNullAsync(
+            Stream stream, CancellationToken cancellationToken = default)
+        {
             ArgumentNullException.ThrowIfNull(stream);
             byte[] headerBytes = new byte[PacketConstants.HeaderSize];
 
-            await ReadExactlyAsync(stream, headerBytes, cancellationToken);
+            int firstRead = await stream.ReadAsync(headerBytes.AsMemory(0, 1), cancellationToken);
+            if (firstRead == 0) return null;
+            await ReadExactlyAsync(stream, headerBytes.AsMemory(1), cancellationToken);
             PacketHeader header = PacketHeader.Parse(headerBytes);
             byte[] payload = new byte[header.PayloadLength];
             if (payload.Length > 0)

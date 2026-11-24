@@ -36,29 +36,14 @@ namespace PentagonLauncher.Backend.Networking
         public async Task ReceiveLoopAsync(ClientPeer peer, CancellationToken token = default)
         {
             NetworkStream stream = peer.Stream;
-            byte[] headerBuffer = new byte[PacketConstants.HeaderSize]; // 6 bytes cố định
 
             try
             {
                 while (!token.IsCancellationRequested && peer.TcpClient.Connected)
                 {
-                    // Đọc đủ 6 bytes Header
-                    int headerRead = await ReadExactAsync(stream, headerBuffer, PacketConstants.HeaderSize, token);
-                    if (headerRead == 0) break; // Client chủ động đóng kết nối
-
-                    PacketHeader header = PacketHeader.Parse(headerBuffer);
-                    int payloadLength = header.PayloadLength;
-
-                    // Đọc đủ phần Payload
-                    byte[] payload = new byte[payloadLength];
-                    if (payloadLength > 0)
-                    {
-                        int payloadRead = await ReadExactAsync(stream, payload, payloadLength, token);
-                        if (payloadRead == 0) break;
-                    }
-
-                    // Xử lý gói tin
-                    await HandlePacketAsync(peer, header.Opcode, payload);
+                    Packet? packet = await PacketStreamReader.ReadPacketOrNullAsync(stream, token);
+                    if (packet is null) break;
+                    await HandlePacketAsync(peer, packet);
                 }
             }
             catch (ProtocolException pEx)
@@ -94,12 +79,10 @@ namespace PentagonLauncher.Backend.Networking
             }
         }
 
-        // Xây dựng cơ chế Request-Response (Gọi PacketReader, AuthService, PacketWriter)
-        private async Task HandlePacketAsync(ClientPeer peer, Opcode opcode, byte[] payload)
+        // Serializer đọc/ghi payload; handler điều phối service và phiên kết nối.
+        private async Task HandlePacketAsync(ClientPeer peer, Packet packet)
         {
-            Packet packet = new(new PacketHeader(payload.Length + PacketConstants.HeaderSize, opcode), payload);
-
-            switch (opcode)
+            switch (packet.Opcode)
             {
                 case Opcode.C2S_Pong: // 1000
                 {
@@ -178,98 +161,53 @@ namespace PentagonLauncher.Backend.Networking
 
                 case Opcode.C2S_RegisterOTPRequest: //1005
                 {
-                        PacketReader reader = new(packet.Payload);
-                        byte purpose = reader.ReadByte();
-                        string email = reader.ReadString(PacketConstants.MaximunEmailByteLength);
-                        reader.EnsureFullyRead();
-
-                        OTP otp = await _otpService.CreateRegistrationOTP(email, OTP.OtpPurpose.Registration);
-
-
-                        var writer = new PacketWriter();
-                        writer.WriteBoolean(true);
-                        writer.WriteString("Đã tạo OTP. Kiểm tra console backend (demo).");
-                        
-                        byte[] responsepacket = writer.Build(Opcode.S2C_RegisterOTPResult);
-                        await peer.SendPacketAsync(responsepacket);
+                        RegisterOTPRequest request = OtpPacketSerializer.ReadRegisterRequest(packet);
+                        await _otpService.CreateRegistrationOTP(request.Email, OTP.OtpPurpose.Registration);
+                        await peer.SendPacketAsync(OtpPacketSerializer.CreateResult(
+                            Opcode.S2C_RegisterOTPResult,
+                            new OtpResult { Success = true, Message = "Đã tạo OTP. Kiểm tra console backend (demo)." }));
                         break;
                 }
 
                 case Opcode.C2S_RegisterOTPVerificationRequest: //1006
                     {
-                        PacketReader reader = new(packet.Payload);
-                        string email = reader.ReadString(PacketConstants.MaximunEmailByteLength);
-                        string otpCode = reader.ReadString(PacketConstants.MaximumOtpcodeByteLength);
-                        OTP.OtpPurpose purpose = (OTP.OtpPurpose)reader.ReadByte();
-                        reader.EnsureFullyRead();
+                        RegisterOTPVerificationRequest request = OtpPacketSerializer.ReadVerificationRequest(
+                            packet, Opcode.C2S_RegisterOTPVerificationRequest);
+                        var res = await _authService.VerifyRegisterOTP(request.Email, request.OTPCode, request.Purpose);
+                        if (res.Success)
+                            peer.OtpPermissions[1] = (request.Email.Trim(), DateTime.UtcNow.AddMinutes(5), request.OTPCode);
 
-                        var writer = new PacketWriter();
-
-                        var res = await _authService.VerifyRegisterOTP(email, otpCode, purpose);
-                        if (res.Success) peer.OtpPermissions[1] = (email.Trim(), DateTime.UtcNow.AddMinutes(5), otpCode);
-                        if ( res.Success)
-                        {
-                            writer.WriteBoolean(true);
-                            writer.WriteString("Đã xác thực OTP thành công");
-                        }
-                        else
-                        {
-                            writer.WriteBoolean(false);
-                            writer.WriteString("Đã xác thực OTP thất bại");
-                        }
-                        
-
-                        byte[] responsepacket = writer.Build(Opcode.S2C_RegisterOTPVerificationResult);
-                        await peer.SendPacketAsync(responsepacket);
+                        await peer.SendPacketAsync(OtpPacketSerializer.CreateResult(
+                            Opcode.S2C_RegisterOTPVerificationResult,
+                            new OtpResult
+                            {
+                                Success = res.Success,
+                                Message = res.Success ? "Đã xác thực OTP thành công" : "Đã xác thực OTP thất bại"
+                            }));
                         break;
                     }
                 case Opcode.C2S_ResetPassOTPVerificationRequest: //1007
                     {
-                        PacketReader reader = new(packet.Payload);
-                        string email = reader.ReadString(PacketConstants.MaximunEmailByteLength);
-                        string otpCode = reader.ReadString(PacketConstants.MaximumOtpcodeByteLength);
-                        OTP.OtpPurpose purpose = (OTP.OtpPurpose)reader.ReadByte();
-                        reader.EnsureFullyRead();
-
-
-                        var writer = new PacketWriter();
-
-                        var res = await _authService.VerifyResetPassOTP(email, otpCode, purpose);
-                        if (res.Success) peer.OtpPermissions[2] = (email.Trim(), DateTime.UtcNow.AddMinutes(5), otpCode);
+                        RegisterOTPVerificationRequest request = OtpPacketSerializer.ReadVerificationRequest(
+                            packet, Opcode.C2S_ResetPassOTPVerificationRequest);
+                        var res = await _authService.VerifyResetPassOTP(request.Email, request.OTPCode, request.Purpose);
                         if (res.Success)
-                        {
-                            writer.WriteBoolean(true);
-                            writer.WriteString("Đã xác thực OTP thành công");
-                        }
-                        else
-                        {
-                            writer.WriteBoolean(false);
-                            writer.WriteString("Đã xác thực OTP thất bại");
-                        }
+                            peer.OtpPermissions[2] = (request.Email.Trim(), DateTime.UtcNow.AddMinutes(5), request.OTPCode);
 
-
-                        byte[] responsepacket = writer.Build(Opcode.S2C_ResetPassOTPVerificationResult);
-                        await peer.SendPacketAsync(responsepacket);
+                        await peer.SendPacketAsync(OtpPacketSerializer.CreateResult(
+                            Opcode.S2C_ResetPassOTPVerificationResult,
+                            new OtpResult
+                            {
+                                Success = res.Success,
+                                Message = res.Success ? "Đã xác thực OTP thành công" : "Đã xác thực OTP thất bại"
+                            }));
                         break;
                     }
 
                 default:
-                    Console.WriteLine($"[Warning] Opcode chưa được hỗ trợ ở Sprint 1: {opcode}");
+                    Console.WriteLine($"[Warning] Opcode chưa được hỗ trợ ở Sprint 1: {packet.Opcode}");
                     break;
             }
-        }
-
-        // Đảm bảo đọc đủ số byte từ luồng TCP
-        private static async Task<int> ReadExactAsync(NetworkStream stream, byte[] buffer, int count, CancellationToken token)
-        {
-            int totalRead = 0;
-            while (totalRead < count)
-            {
-                int read = await stream.ReadAsync(buffer.AsMemory(totalRead, count - totalRead), token);
-                if (read == 0) return 0; // Đã đóng kết nối
-                totalRead += read;
-            }
-            return totalRead;
         }
 
     }

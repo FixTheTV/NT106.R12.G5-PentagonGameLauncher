@@ -27,10 +27,8 @@ namespace PentagonLauncher.Launcher.Networking
         private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
         // Hàng đợi đồng bộ cho cơ chế Request - Response
-        private TaskCompletionSource<(Opcode Opcode, byte[] Payload)>? _pendingRequest;
+        private TaskCompletionSource<Packet>? _pendingRequest;
         private readonly SemaphoreSlim _requestLock = new(1, 1);
-
-        private const int MaxStringBytes = 256;
 
         public bool IsConnected => _tcpClient?.Connected ?? false;
 
@@ -101,37 +99,24 @@ namespace PentagonLauncher.Launcher.Networking
         // 2. VÒNG LẶP NHẬN DỮ LIỆU TỪ SERVER (Chạy ngầm)
         private async Task ReceiveLoopAsync(CancellationToken token)
         {
-            byte[] headerBuffer = new byte[PacketConstants.HeaderSize]; // 6 bytes cố định
-
             try
             {
                 while (!token.IsCancellationRequested && _stream != null && IsConnected)
                 {
-                    // Đọc đủ 6 bytes Header
-                    int headerRead = await ReadExactAsync(_stream, headerBuffer, PacketConstants.HeaderSize, token);
-                    if (headerRead == 0) break; // Server đóng kết nối
-
-                    PacketHeader header = PacketHeader.Parse(headerBuffer);
-                    int payloadLength = header.PayloadLength;
-
-                    // Đọc đủ phần Payload
-                    byte[] payload = new byte[payloadLength];
-                    if (payloadLength > 0)
-                    {
-                        int payloadRead = await ReadExactAsync(_stream, payload, payloadLength, token);
-                        if (payloadRead == 0) break;
-                    }
+                    Packet? packet = await PacketStreamReader.ReadPacketOrNullAsync(_stream, token);
+                    if (packet is null) break;
 
                     // Nếu Server gửi gói Ping (2000), tự động trả lời Pong (1000)
-                    if (header.Opcode == Opcode.S2C_Ping)
+                    if (packet.Opcode == Opcode.S2C_Ping)
                     {
+                        ConnectionPacketSerializer.ReadPingPacket(packet);
                         byte[] pongPacket = ConnectionPacketSerializer.CreatePongPacket();
                         await _stream.WriteAsync(pongPacket, 0, pongPacket.Length, token);
                         continue;
                     }
 
                     // Đánh thức hàm Request đang chờ kết quả từ Server
-                    _pendingRequest?.TrySetResult((header.Opcode, payload));
+                    _pendingRequest?.TrySetResult(packet);
                 }
             }
             catch (Exception ex)
@@ -147,7 +132,7 @@ namespace PentagonLauncher.Launcher.Networking
         }
 
         // 3. CƠ CHẾ REQUEST - RESPONSE CỐT LÕI
-        private async Task<(Opcode Opcode, byte[] Payload)> SendRequestAsync(byte[] packetBytes, int timeoutMs = 10000)
+        private async Task<Packet> SendRequestAsync(byte[] packetBytes, int timeoutMs = 10000)
         {
             if (!IsConnected || _stream == null)
                 throw new InvalidOperationException("Chưa kết nối tới máy chủ.");
@@ -157,7 +142,7 @@ namespace PentagonLauncher.Launcher.Networking
             {
                 if (!IsConnected || _stream == null)
                     throw new IOException("Kết nối đã đóng.");
-                _pendingRequest = new TaskCompletionSource<(Opcode, byte[])>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _pendingRequest = new TaskCompletionSource<Packet>(TaskCreationOptions.RunContinuationsAsynchronously);
 
                 // Gửi gói tin lên Server
                 await _stream.WriteAsync(packetBytes, 0, packetBytes.Length);
@@ -195,13 +180,13 @@ namespace PentagonLauncher.Launcher.Networking
                     Password = password ?? string.Empty
                 });
 
-                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
-                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                Packet response = await SendRequestAsync(requestBytes);
+                if (response.Opcode == Opcode.S2C_ErrorResponse)
                 {
-                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    var (errSuccess, errMsg) = ErrorPacketSerializer.ReadErrorResponsePacket(response);
                     return new LoginResult { Success = errSuccess, Message = errMsg};
                 }
-                return AuthPacketSerializer.ReadLoginResult(CreatePacket(responseOpcode, payload));
+                return AuthPacketSerializer.ReadLoginResult(response);
             }
             catch (Exception ex)
             {
@@ -221,13 +206,13 @@ namespace PentagonLauncher.Launcher.Networking
                     Password = password ?? string.Empty
                 });
 
-                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
-                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                Packet response = await SendRequestAsync(requestBytes);
+                if (response.Opcode == Opcode.S2C_ErrorResponse)
                 {
-                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    var (errSuccess, errMsg) = ErrorPacketSerializer.ReadErrorResponsePacket(response);
                     return new RegisterResult { Success = errSuccess, Message = errMsg };
                 }
-                return AuthPacketSerializer.ReadRequestResult(CreatePacket(responseOpcode, payload));
+                return AuthPacketSerializer.ReadRequestResult(response);
             }
             catch (Exception ex)
             {
@@ -245,14 +230,14 @@ namespace PentagonLauncher.Launcher.Networking
                     Email = email ?? string.Empty
                 });
 
-                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
+                Packet response = await SendRequestAsync(requestBytes);
 
-                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                if (response.Opcode == Opcode.S2C_ErrorResponse)
                 {
-                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    var (errSuccess, errMsg) = ErrorPacketSerializer.ReadErrorResponsePacket(response);
                     return new ForgotPasswordResult { Success = errSuccess, Message = errMsg };
                 }
-                return AuthPacketSerializer.ReadForgotPasswordResult(CreatePacket(responseOpcode, payload));
+                return AuthPacketSerializer.ReadForgotPasswordResult(response);
             }
             catch (Exception ex)
             {
@@ -272,13 +257,13 @@ namespace PentagonLauncher.Launcher.Networking
                     NewPassword = newPassword ?? string.Empty
                 });
 
-                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
-                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                Packet response = await SendRequestAsync(requestBytes);
+                if (response.Opcode == Opcode.S2C_ErrorResponse)
                 {
-                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    var (errSuccess, errMsg) = ErrorPacketSerializer.ReadErrorResponsePacket(response);
                     return new ResetPasswordResult { Success = errSuccess, Message = errMsg };
                 }
-                return AuthPacketSerializer.ReadResetPasswordResult(CreatePacket(responseOpcode, payload));
+                return AuthPacketSerializer.ReadResetPasswordResult(response);
 
             }
             catch (Exception ex)
@@ -292,23 +277,23 @@ namespace PentagonLauncher.Launcher.Networking
         {
             try
             {
-                var writer = new PacketWriter();
-                writer.WriteByte((byte)purpose);
-                writer.WriteString(email ?? string.Empty);
-                byte[] requestBytes = writer.Build(Opcode.C2S_RegisterOTPRequest);
-
-                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
-
-
-                var reader = new PacketReader(payload);
-
-                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                byte[] requestBytes = OtpPacketSerializer.CreateRegisterRequest(new RegisterOTPRequest
                 {
-                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    Email = email ?? string.Empty,
+                    Purpose = purpose
+                });
+
+                Packet response = await SendRequestAsync(requestBytes);
+
+
+
+                if (response.Opcode == Opcode.S2C_ErrorResponse)
+                {
+                    var (errSuccess, errMsg) = ErrorPacketSerializer.ReadErrorResponsePacket(response);
                     return new OtpResult { Success = errSuccess, Message = errMsg };
                 }
 
-                return OtpPacketSerializer.ReadResult(CreatePacket(responseOpcode, payload), Opcode.S2C_RegisterOTPResult);
+                return OtpPacketSerializer.ReadResult(response, Opcode.S2C_RegisterOTPResult);
 
             }
             catch (Exception ex)
@@ -322,24 +307,24 @@ namespace PentagonLauncher.Launcher.Networking
         {
             try
             {
-                var writer = new PacketWriter();
-                writer.WriteString(email ?? string.Empty);
-                writer.WriteString(otpCode);
-                writer.WriteByte((byte)purpose);
+                byte[] requestBytes = OtpPacketSerializer.CreateVerificationRequest(
+                    Opcode.C2S_RegisterOTPVerificationRequest, new RegisterOTPVerificationRequest
+                    {
+                        Email = email ?? string.Empty,
+                        OTPCode = otpCode,
+                        Purpose = purpose
+                    });
 
-                byte[] requestBytes = writer.Build(Opcode.C2S_RegisterOTPVerificationRequest);
+                Packet response = await SendRequestAsync(requestBytes);
 
-                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
 
-                var reader = new PacketReader(payload);
-
-                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                if (response.Opcode == Opcode.S2C_ErrorResponse)
                 {
-                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    var (errSuccess, errMsg) = ErrorPacketSerializer.ReadErrorResponsePacket(response);
                     return new OtpResult { Success = errSuccess, Message = errMsg };
                 }
 
-                return OtpPacketSerializer.ReadResult(CreatePacket(responseOpcode, payload), Opcode.S2C_RegisterOTPVerificationResult);
+                return OtpPacketSerializer.ReadResult(response, Opcode.S2C_RegisterOTPVerificationResult);
 
             }
             catch (Exception ex)
@@ -353,24 +338,24 @@ namespace PentagonLauncher.Launcher.Networking
         {
             try
             {
-                var writer = new PacketWriter();
-                writer.WriteString(email ?? string.Empty);
-                writer.WriteString(otpCode);
-                writer.WriteByte((byte)purpose);
+                byte[] requestBytes = OtpPacketSerializer.CreateVerificationRequest(
+                    Opcode.C2S_ResetPassOTPVerificationRequest, new RegisterOTPVerificationRequest
+                    {
+                        Email = email ?? string.Empty,
+                        OTPCode = otpCode,
+                        Purpose = purpose
+                    });
 
-                byte[] requestBytes = writer.Build(Opcode.C2S_ResetPassOTPVerificationRequest);
+                Packet response = await SendRequestAsync(requestBytes);
 
-                var (responseOpcode, payload) = await SendRequestAsync(requestBytes);
 
-                var reader = new PacketReader(payload);
-
-                if (responseOpcode == Opcode.S2C_ErrorResponse)
+                if (response.Opcode == Opcode.S2C_ErrorResponse)
                 {
-                    var (errSuccess, errMsg) = ReadErrorResponse(responseOpcode, payload);
+                    var (errSuccess, errMsg) = ErrorPacketSerializer.ReadErrorResponsePacket(response);
                     return new OtpResult { Success = errSuccess, Message = errMsg };
                 }
 
-                return OtpPacketSerializer.ReadResult(CreatePacket(responseOpcode, payload), Opcode.S2C_ResetPassOTPVerificationResult);
+                return OtpPacketSerializer.ReadResult(response, Opcode.S2C_ResetPassOTPVerificationResult);
 
             }
             catch (Exception ex)
@@ -379,22 +364,6 @@ namespace PentagonLauncher.Launcher.Networking
             }
         }
 
-
-        // Đảm bảo đọc đủ số byte từ TCP Stream
-        private static async Task<int> ReadExactAsync(NetworkStream stream, byte[] buffer, int count, CancellationToken token)
-        {
-            int totalRead = 0;
-            while (totalRead < count)
-            {
-                int read = await stream.ReadAsync(buffer.AsMemory(totalRead, count - totalRead), token);
-                if (read == 0) return 0;
-                totalRead += read;
-            }
-            return totalRead;
-        }
-
-        private static Packet CreatePacket(Opcode opcode, byte[] payload) =>
-            new(new PacketHeader(payload.Length + PacketConstants.HeaderSize, opcode), payload);
 
         private static string DescribeError(Exception ex)
         {
@@ -409,9 +378,6 @@ namespace PentagonLauncher.Launcher.Networking
                 _ => "Có lỗi xử lý phía ứng dụng. Vui lòng thử lại."
             };
         }
-
-        private static (bool Success, string Message) ReadErrorResponse(Opcode opcode, byte[] payload) =>
-            ErrorPacketSerializer.ReadErrorResponsePacket(CreatePacket(opcode, payload));
 
         public void Dispose()
         {
